@@ -57,6 +57,35 @@ export class GmailService {
     }
   }
 
+  async getInboxMessageCount(): Promise<number> {
+    try {
+      console.log('🔍 [DEBUG] Getting inbox message count...');
+      
+      // Get all inbox messages (up to a reasonable limit)
+      const response = await axios.get(
+        'https://gmail.googleapis.com/gmail/v1/users/me/messages?q=in:inbox&maxResults=500',
+        { headers: this.getHeaders() }
+      );
+      
+      console.log('🔍 [DEBUG] Response status:', response.status);
+      console.log('🔍 [DEBUG] Total messages in response:', response.data.messages?.length || 0);
+      
+      // Return the actual count of messages we can process
+      const count = response.data.messages?.length || 0;
+      console.log('🔍 [DEBUG] Actual message count:', count);
+      
+      return count;
+    } catch (error) {
+      console.error('❌ [DEBUG] Error fetching inbox message count:', error);
+      if (axios.isAxiosError(error)) {
+        console.error('❌ [DEBUG] Axios error response:', error.response?.data);
+        console.error('❌ [DEBUG] Axios error status:', error.response?.status);
+        console.error('❌ [DEBUG] Axios error headers:', error.response?.headers);
+      }
+      throw new Error('Failed to fetch inbox message count');
+    }
+  }
+
   async getMessages(maxResults: number = 10, query?: string): Promise<GmailMessage[]> {
     try {
       let url = `https://gmail.googleapis.com/gmail/v1/users/me/messages?maxResults=${maxResults}`;

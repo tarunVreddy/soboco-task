@@ -1,12 +1,15 @@
 import { Request, Response } from 'express';
 import { GmailService } from '../../services/gmail/GmailService';
 import { DatabaseService } from '../../services/database/DatabaseService';
+import { TaskService } from '../../services/tasks/TaskService';
 
 export class GmailController {
   private databaseService: DatabaseService;
+  private taskService: TaskService;
 
   constructor() {
     this.databaseService = new DatabaseService();
+    this.taskService = new TaskService();
   }
 
   async getGmailProfile(req: Request, res: Response): Promise<void> {
@@ -36,9 +39,15 @@ export class GmailController {
 
       const gmailService = new GmailService(gmailIntegration.access_token);
       const profile = await gmailService.getProfile();
+      
+      // Get unparsed message count instead of total inbox count
+      const unparsedCount = await this.taskService.getUnparsedMessageCount(user.id, gmailIntegration.id);
 
       res.status(200).json({ 
-        profile,
+        profile: {
+          ...profile,
+          messagesTotal: unparsedCount // Show unparsed message count
+        },
         integration: {
           id: gmailIntegration.id,
           account_name: gmailIntegration.account_name,

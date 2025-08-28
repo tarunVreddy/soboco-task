@@ -33,6 +33,15 @@ export interface Task {
   updated_at: string;
 }
 
+export interface ParsedMessage {
+  id: string;
+  user_id: string;
+  integration_id: string;
+  gmail_message_id: string;
+  parsed_at: string;
+  tasks_extracted: number;
+}
+
 export interface Integration {
   id: string;
   user_id: string;
@@ -46,6 +55,8 @@ export interface Integration {
   created_at: string;
   updated_at: string;
 }
+
+
 
 export interface Message {
   id: string;
@@ -342,5 +353,54 @@ export class DatabaseService {
     // This would typically create tables, but Supabase handles this
     // We can add any initialization logic here if needed
     console.log('✅ Database initialized (tables should be created via Supabase dashboard)');
+  }
+
+  // ParsedMessage operations
+  async createParsedMessage(parsedMessageData: Omit<ParsedMessage, 'id' | 'parsed_at'>): Promise<ParsedMessage> {
+    const { data, error } = await supabase
+      .from('parsed_messages')
+      .insert({
+        ...parsedMessageData,
+        parsed_at: new Date().toISOString(),
+      })
+      .select()
+      .single();
+
+    if (error) throw new Error(`Failed to create parsed message: ${error.message}`);
+    return data;
+  }
+
+  async findParsedMessagesByIntegration(userId: string, integrationId: string): Promise<ParsedMessage[]> {
+    const { data, error } = await supabase
+      .from('parsed_messages')
+      .select('*')
+      .eq('user_id', userId)
+      .eq('integration_id', integrationId);
+
+    if (error) throw new Error(`Failed to find parsed messages: ${error.message}`);
+    return data || [];
+  }
+
+  async isMessageParsed(userId: string, integrationId: string, gmailMessageId: string): Promise<boolean> {
+    const { data, error } = await supabase
+      .from('parsed_messages')
+      .select('id')
+      .eq('user_id', userId)
+      .eq('integration_id', integrationId)
+      .eq('gmail_message_id', gmailMessageId)
+      .single();
+
+    if (error && error.code !== 'PGRST116') throw new Error(`Failed to check parsed message: ${error.message}`);
+    return !!data;
+  }
+
+  async clearParsedMessages(userId: string, integrationId: string): Promise<void> {
+    const { error } = await supabase
+      .from('parsed_messages')
+      .delete()
+      .eq('user_id', userId)
+      .eq('integration_id', integrationId);
+
+    if (error) throw new Error(`Failed to clear parsed messages: ${error.message}`);
   }
 }

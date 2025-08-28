@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
-import { Link } from 'react-router-dom';
+import Header from './Header';
 import axios from 'axios';
 
 interface Integration {
@@ -143,23 +143,7 @@ const Integrations: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-gray-50">
-      {/* Header */}
-      <header className="bg-white shadow-sm border-b border-gray-200">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex justify-between items-center h-16">
-            <div className="flex items-center space-x-4">
-              <Link 
-                to="/dashboard" 
-                className="text-primary-600 hover:text-primary-700 font-medium text-sm flex items-center"
-              >
-                ← Back to Dashboard
-              </Link>
-            </div>
-            <h1 className="text-xl font-semibold text-gray-900">Email Integrations</h1>
-            <div className="w-20"></div> {/* Spacer for centering */}
-          </div>
-        </div>
-      </header>
+      <Header />
 
       {/* Main Content */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">

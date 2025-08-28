@@ -6,6 +6,8 @@ import { connectDatabase, disconnectDatabase } from './db';
 import authRoutes from './api/routes/auth';
 import integrationRoutes from './api/routes/integrations';
 import gmailRoutes from './api/routes/gmail';
+import taskRoutes from './api/routes/tasks';
+import oauthRoutes from './api/routes/oauth';
 
 const app = express();
 
@@ -21,6 +23,8 @@ app.use(express.static(path.join(__dirname, '../frontend/build')));
 app.use('/api/auth', authRoutes);
 app.use('/api/integrations', integrationRoutes);
 app.use('/api/gmail', gmailRoutes);
+app.use('/api/tasks', taskRoutes);
+app.use('/auth', oauthRoutes);
 
 // Health check endpoint
 app.get('/health', (req, res) => {

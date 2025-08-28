@@ -6,6 +6,7 @@ import Register from './components/Register';
 import Dashboard from './components/Dashboard';
 import Profile from './components/Profile';
 import Integrations from './components/Integrations';
+import OAuthCallback from './components/OAuthCallback';
 
 const PrivateRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { user } = useAuth();
@@ -30,6 +31,7 @@ function AppRoutes() {
           <Register />
         </PublicRoute>
       } />
+      <Route path="/oauth-callback" element={<OAuthCallback />} />
       <Route path="/dashboard" element={
         <PrivateRoute>
           <Dashboard />
