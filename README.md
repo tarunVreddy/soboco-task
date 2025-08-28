@@ -1,37 +1,43 @@
 # SoBoCo Task Management App
 
-An AI-powered task management application that automatically extracts tasks from Slack messages, emails (Gmail, Microsoft 365, Exchange), and other sources using local AI processing.
+An AI-powered task management application that automatically extracts tasks from Gmail messages using local AI processing with support for multiple accounts and advanced rate limiting.
 
 ## 🚀 Features
 
-- **Multi-user authentication** with email/password and social login support
-- **AI-powered task extraction** using local Ollama server
-- **Multi-source integration** (Slack, Gmail, Microsoft 365/Exchange)
-- **Real-time monitoring** of messages for task extraction
+- **Multi-user authentication** with Google OAuth 2.0
+- **AI-powered task extraction** using local Ollama server with batch processing
+- **Multi-account Gmail integration** with account keychain support
+- **Automatic rate limiting** and token refresh for Gmail API
+- **Real-time task extraction** from email messages
 - **Modern React frontend** with beautiful UI
-- **TypeScript backend** with Express and Prisma ORM
+- **TypeScript backend** with Express and Supabase
 - **PostgreSQL database** with comprehensive schema
+- **Batch processing** for efficient AI task extraction
+- **Account management** with integration toggling
 
 ## 🛠 Tech Stack
 
 ### Backend
 - **Node.js** + **TypeScript**
 - **Express.js** web framework
-- **Prisma ORM** for database management
+- **Supabase** for database and authentication
 - **PostgreSQL** database
 - **JWT** for authentication
-- **bcryptjs** for password hashing
-- **node-cron** for background jobs
+- **Google OAuth 2.0** for Gmail integration
+- **Ollama** for local AI processing
 
 ### Frontend
 - **React** + **TypeScript**
 - **React Router** for navigation
 - **Axios** for API communication
-- **Modern CSS** with responsive design
+- **TailwindCSS** for styling
+- **Modern responsive design**
 
 ### AI Integration
 - **Ollama** for local AI processing
 - **Pluggable AI provider interface** for easy switching
+- **Batch processing** for efficient task extraction
+- **Configurable models** (phi4, phi4-mini, qwen3:0.6b)
 
 ## 📋 Prerequisites
 
@@ -40,6 +46,7 @@ Before running this application, make sure you have:
 1. **Node.js** (v16 or higher)
 2. **Supabase** project (recommended) or **PostgreSQL** database
 3. **Ollama** server running locally (optional for AI features)
+4. **Google Cloud Console** project for OAuth credentials
 
 ## 🚀 Quick Start
 
@@ -76,6 +83,12 @@ cd ..
    SUPABASE_DB_PASSWORD="your-database-password"
    DATABASE_URL="postgresql://postgres:your-database-password@db.your-project-id.supabase.co:5432/postgres"
    JWT_SECRET="your-super-secret-jwt-key-here"
+   GOOGLE_CLIENT_ID="your-google-client-id"
+   GOOGLE_CLIENT_SECRET="your-google-client-secret"
+   OLLAMA_BASE_URL="http://localhost:11434"
+   OLLAMA_MODEL="phi4-mini"
+   OLLAMA_MAX_TOKENS="4000"
+   OLLAMA_BATCH_SIZE="10"
    ```
    
    **Or use the interactive setup script:**
@@ -109,7 +122,17 @@ cd ..
 2. Copy and paste the contents of `supabase-schema.sql`
 3. Run the SQL to create all tables
 
-### 4. Start the Application
+### 4. Google OAuth Setup
+
+1. Create a Google Cloud Console project
+2. Enable Gmail API
+3. Create OAuth 2.0 credentials
+4. Configure authorized redirect URIs
+5. Update your `.env` file with Google credentials
+
+See [GOOGLE_OAUTH_SETUP.md](./GOOGLE_OAUTH_SETUP.md) for detailed instructions.
+
+### 5. Start the Application
 
 #### Development Mode
 
@@ -132,7 +155,7 @@ npm run build
 npm start
 ```
 
-### 5. Access the Application
+### 6. Access the Application
 
 - **Frontend**: http://localhost:3000
 - **Backend API**: http://localhost:3000/api
@@ -147,14 +170,16 @@ To enable AI-powered task extraction:
    ```bash
    ollama serve
    ```
-3. **Pull a model** (e.g., llama2):
+3. **Pull a model** (recommended: phi4-mini for speed/quality balance):
    ```bash
-   ollama pull llama2
+   ollama pull phi4-mini
    ```
 4. **Update environment variables**:
    ```env
    OLLAMA_BASE_URL="http://localhost:11434"
-   OLLAMA_MODEL="llama2"
+   OLLAMA_MODEL="phi4-mini"
+   OLLAMA_MAX_TOKENS="4000"
+   OLLAMA_BATCH_SIZE="10"
    ```
 
 ## 📁 Project Structure
@@ -168,11 +193,11 @@ To enable AI-powered task extraction:
     /auth           # Authentication service
     /tasks          # Task management service
     /users          # User management service
-    /monitoring     # Background monitoring service
+    /gmail          # Gmail integration service
+    /database       # Supabase database service layer
   /integrations
-    /slack          # Slack integration
     /gmail          # Gmail integration
-    /microsoft      # Microsoft integration
+    /microsoft      # Microsoft integration (planned)
   /ai
     /providers      # AI provider implementations
     /interfaces     # AI provider interfaces
@@ -181,7 +206,7 @@ To enable AI-powered task extraction:
   /utils           # Utility functions
   /middleware      # Express middleware
 /frontend          # React frontend application
-/prisma            # Database schema and migrations
+/supabase          # Database migrations and schema
 ```
 
 ## 🔧 Configuration
@@ -194,25 +219,24 @@ To enable AI-powered task extraction:
 | `SUPABASE_ANON_KEY` | Supabase anonymous key | - |
 | `SUPABASE_SERVICE_ROLE_KEY` | Supabase service role key | - |
 | `SUPABASE_DB_PASSWORD` | Supabase database password | - |
-| `DATABASE_URL` | PostgreSQL connection string (auto-generated for Supabase) | - |
+| `DATABASE_URL` | PostgreSQL connection string | - |
 | `JWT_SECRET` | JWT signing secret | - |
 | `PORT` | Server port | 3000 |
 | `NODE_ENV` | Environment mode | development |
+| `GOOGLE_CLIENT_ID` | Google OAuth client ID | - |
+| `GOOGLE_CLIENT_SECRET` | Google OAuth client secret | - |
 | `OLLAMA_BASE_URL` | Ollama server URL | http://localhost:11434 |
-| `OLLAMA_MODEL` | Ollama model name | llama2 |
-
-### OAuth Configuration
-
-For full functionality, configure OAuth credentials for:
-- **Slack**: `SLACK_CLIENT_ID`, `SLACK_CLIENT_SECRET`
-- **Gmail**: `GMAIL_CLIENT_ID`, `GMAIL_CLIENT_SECRET`
-- **Microsoft**: `MICROSOFT_CLIENT_ID`, `MICROSOFT_CLIENT_SECRET`
+| `OLLAMA_MODEL` | Ollama model name | phi4-mini |
+| `OLLAMA_MAX_TOKENS` | Maximum tokens for AI prompts | 4000 |
+| `OLLAMA_BATCH_SIZE` | Batch size for AI processing | 10 |
 
 ## 🧪 Testing the Application
 
 1. **Register a new account** at http://localhost:3000/register
 2. **Login** with your credentials
-3. **Explore the dashboard** to see the task management interface
+3. **Add Gmail accounts** via the Account Keychain
+4. **Parse tasks** from your Gmail messages
+5. **Manage tasks** in the dashboard
 
 ## 🔄 API Endpoints
 
@@ -222,18 +246,62 @@ For full functionality, configure OAuth credentials for:
 - `POST /api/auth/logout` - User logout
 - `GET /api/auth/me` - Get current user info
 
+### Gmail Integration
+- `GET /api/gmail/profile` - Get Gmail profile
+- `GET /api/gmail/messages` - Get Gmail messages
+- `GET /api/gmail/message-counts` - Get message counts for all accounts
+
+### Task Management
+- `GET /api/tasks` - Get user tasks
+- `POST /api/tasks/parse-gmail` - Parse Gmail for tasks
+- `POST /api/tasks/reset-tracking` - Reset message tracking
+- `GET /api/tasks/unparsed-count` - Get unparsed message count
+
+### Integrations
+- `GET /api/integrations` - Get user integrations
+- `DELETE /api/integrations/:id` - Remove integration
+- `PUT /api/integrations/:id/toggle` - Toggle integration
+- `GET /api/integrations/add-account-url` - Get OAuth URL
+
 ### Health Check
 - `GET /health` - Application health status
 
-## 🚧 Coming Soon
+## 🚧 Current Implementation Status ✅
 
-- [ ] Slack integration with OAuth
-- [ ] Gmail integration with OAuth
-- [ ] Microsoft 365/Exchange integration
-- [ ] Background message monitoring
-- [ ] Task management interface
-- [ ] Real-time notifications
-- [ ] Mobile app support
+### Completed Features
+- ✅ **Multi-user authentication** with Google OAuth 2.0
+- ✅ **Gmail integration** with OAuth 2.0 and token refresh
+- ✅ **Multi-account keychain** for managing multiple Gmail accounts
+- ✅ **AI-powered task extraction** using Ollama with batch processing
+- ✅ **Rate limiting** and automatic retry for Gmail API
+- ✅ **Task management** with account association
+- ✅ **Modern React frontend** with TailwindCSS
+- ✅ **Database schema** with proper relationships
+- ✅ **Background processing** for efficient task extraction
+- ✅ **Comprehensive error handling** and logging
+
+### Technical Implementation
+- **Database**: Supabase with direct client integration
+- **Authentication**: Google OAuth 2.0 with automatic token refresh
+- **Frontend**: React with TypeScript and TailwindCSS
+- **AI Integration**: Ollama with batch processing and configurable models
+- **Architecture**: Single Express server serving both API and React app
+- **Rate Limiting**: Smart delays and retry logic for Gmail API
+- **Multi-Account**: Keychain system for managing multiple Gmail accounts
+
+### Performance Features
+- ✅ **Batch processing** for efficient AI task extraction
+- ✅ **Rate limiting** to prevent API quota exhaustion
+- ✅ **Token refresh** for continuous Gmail API access
+- ✅ **Configurable AI models** (phi4, phi4-mini, qwen3:0.6b)
+- ✅ **Smart message tracking** to avoid reprocessing
+
+### Next Steps
+- 🔄 **Slack integration** with OAuth
+- 🔄 **Microsoft 365/Exchange integration**
+- 🔄 **Real-time notifications**
+- 🔄 **Mobile app support**
+- 🔄 **Advanced task management** (due dates, priorities, categories)
 
 ## 🤝 Contributing
 
