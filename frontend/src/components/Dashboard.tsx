@@ -1,13 +1,54 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { Link } from 'react-router-dom';
+import axios from 'axios';
 
 const Dashboard: React.FC = () => {
-  const { user, logout } = useAuth();
+  const { user, logout, token } = useAuth();
+  const [gmailData, setGmailData] = useState<{
+    messagesTotal: number;
+    email: string;
+    isConnected: boolean;
+  } | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
 
   const handleLogout = () => {
     logout();
   };
+
+  useEffect(() => {
+    const fetchGmailData = async () => {
+      try {
+        setLoading(true);
+        const response = await axios.get('/api/gmail/profile', {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+        setGmailData({
+          messagesTotal: response.data.profile.messagesTotal,
+          email: response.data.profile.emailAddress,
+          isConnected: true
+        });
+      } catch (error: any) {
+        if (error.response?.status === 400) {
+          // Gmail not connected
+          setGmailData({
+            messagesTotal: 0,
+            email: '',
+            isConnected: false
+          });
+        } else {
+          setError('Failed to fetch Gmail data');
+        }
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    if (token) {
+      fetchGmailData();
+    }
+  }, [token]);
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -52,53 +93,48 @@ const Dashboard: React.FC = () => {
             </p>
           </div>
 
-          {/* Features Grid */}
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-            <div className="bg-white rounded-xl shadow-sm p-6 hover:shadow-md transition-shadow">
-              <div className="text-3xl mb-4">📧</div>
-              <h3 className="text-lg font-semibold text-gray-900 mb-3">Email Integration</h3>
-              <p className="text-gray-600 mb-4">
-                Connect your Gmail, Microsoft 365, or Exchange accounts to automatically extract tasks from emails.
-              </p>
-              <Link 
-                to="/integrations"
-                className="inline-block bg-primary-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-primary-700 transition-colors"
-              >
-                Connect Now
-              </Link>
-            </div>
-
-            <div className="bg-white rounded-xl shadow-sm p-6 hover:shadow-md transition-shadow">
-              <div className="text-3xl mb-4">💬</div>
-              <h3 className="text-lg font-semibold text-gray-900 mb-3">Slack Integration</h3>
-              <p className="text-gray-600 mb-4">
-                Connect your Slack workspace to extract tasks from messages and conversations.
-              </p>
-              <button className="bg-gray-300 text-gray-500 px-4 py-2 rounded-lg text-sm font-medium cursor-not-allowed">
-                Coming Soon
-              </button>
-            </div>
-
-            <div className="bg-white rounded-xl shadow-sm p-6 hover:shadow-md transition-shadow">
-              <div className="text-3xl mb-4">🤖</div>
-              <h3 className="text-lg font-semibold text-gray-900 mb-3">AI Task Extraction</h3>
-              <p className="text-gray-600 mb-4">
-                Our AI automatically identifies and extracts actionable tasks from your messages.
-              </p>
-              <button className="bg-gray-300 text-gray-500 px-4 py-2 rounded-lg text-sm font-medium cursor-not-allowed">
-                Coming Soon
-              </button>
-            </div>
-
-            <div className="bg-white rounded-xl shadow-sm p-6 hover:shadow-md transition-shadow">
-              <div className="text-3xl mb-4">📋</div>
-              <h3 className="text-lg font-semibold text-gray-900 mb-3">Task Management</h3>
-              <p className="text-gray-600 mb-4">
-                Review, edit, and manage all your extracted tasks in one place.
-              </p>
-              <button className="bg-gray-300 text-gray-500 px-4 py-2 rounded-lg text-sm font-medium cursor-not-allowed">
-                Coming Soon
-              </button>
+          {/* Gmail Inbox Status */}
+          <div className="bg-white rounded-xl shadow-sm p-8">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center space-x-4">
+                <div className="text-4xl">📧</div>
+                <div>
+                  <h3 className="text-2xl font-bold text-gray-900">Gmail Inbox</h3>
+                  {loading ? (
+                    <p className="text-gray-600">Loading...</p>
+                  ) : error ? (
+                    <p className="text-red-600">{error}</p>
+                  ) : gmailData?.isConnected ? (
+                    <div>
+                      <p className="text-gray-600">
+                        Connected to <span className="font-medium text-gray-900">{gmailData.email}</span>
+                      </p>
+                      <p className="text-3xl font-bold text-primary-600 mt-2">
+                        {gmailData.messagesTotal.toLocaleString()} messages
+                      </p>
+                    </div>
+                  ) : (
+                    <div>
+                      <p className="text-gray-600 mb-3">No Gmail account connected</p>
+                      <Link 
+                        to="/integrations"
+                        className="inline-block bg-primary-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-primary-700 transition-colors"
+                      >
+                        Connect Gmail
+                      </Link>
+                    </div>
+                  )}
+                </div>
+              </div>
+              
+              {gmailData?.isConnected && (
+                <div className="text-right">
+                  <div className="text-sm text-gray-500">Last updated</div>
+                  <div className="text-sm font-medium text-gray-900">
+                    {new Date().toLocaleTimeString()}
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         </div>
