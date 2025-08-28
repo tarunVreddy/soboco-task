@@ -32,7 +32,7 @@ const Integrations: React.FC = () => {
   const fetchIntegrations = async () => {
     try {
       setLoading(true);
-      const response = await axios.get('/integrations', {
+      const response = await axios.get('/api/integrations', {
         headers: { Authorization: `Bearer ${token}` }
       });
       setIntegrations(response.data.integrations);
@@ -54,7 +54,7 @@ const Integrations: React.FC = () => {
     }
 
     try {
-      const response = await axios.post('/integrations/gmail', {
+      const response = await axios.post('/api/integrations/gmail', {
         email: formData.email,
         accessToken: formData.accessToken,
         refreshToken: formData.refreshToken || undefined
@@ -73,7 +73,7 @@ const Integrations: React.FC = () => {
 
   const handleToggleIntegration = async (integrationId: string, isActive: boolean) => {
     try {
-      await axios.patch(`/integrations/${integrationId}/toggle`, {
+      await axios.patch(`/api/integrations/${integrationId}/toggle`, {
         isActive: !isActive
       }, {
         headers: { Authorization: `Bearer ${token}` }
@@ -90,7 +90,7 @@ const Integrations: React.FC = () => {
     }
 
     try {
-      await axios.delete(`/integrations/${integrationId}`, {
+      await axios.delete(`/api/integrations/${integrationId}`, {
         headers: { Authorization: `Bearer ${token}` }
       });
       setMessage('Integration removed successfully');

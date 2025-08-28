@@ -30,14 +30,15 @@ const Dashboard: React.FC = () => {
           isConnected: true
         });
       } catch (error: any) {
-        if (error.response?.status === 400) {
-          // Gmail not connected
+        if (error.response?.status === 400 && error.response?.data?.error?.includes('Gmail integration not found')) {
+          // Gmail not connected - this is expected
           setGmailData({
             messagesTotal: 0,
             email: '',
             isConnected: false
           });
         } else {
+          console.error('Gmail API error:', error);
           setError('Failed to fetch Gmail data');
         }
       } finally {
