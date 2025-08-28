@@ -18,8 +18,12 @@ export class TaskController {
         return;
       }
 
+      console.log(`🔍 [DEBUG] Parsing tasks for user ${user.id}, integration ${integrationId}`);
+      
       const result = await this.taskService.parseGmailForTasks(user.id, integrationId);
-
+      
+      console.log(`✅ [DEBUG] Parse result for integration ${integrationId}:`, result);
+      
       res.status(200).json({
         message: 'Gmail parsing completed',
         extracted: result.extracted,

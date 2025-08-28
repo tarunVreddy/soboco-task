@@ -11,6 +11,9 @@ router.use(authMiddleware);
 // Get Gmail profile
 router.get('/profile', (req, res) => gmailController.getGmailProfile(req, res));
 
+// Get detailed message counts for all accounts
+router.get('/message-counts', (req, res) => gmailController.getGmailMessageCounts(req, res));
+
 // Get Gmail messages
 router.get('/messages', (req, res) => gmailController.getGmailMessages(req, res));
 

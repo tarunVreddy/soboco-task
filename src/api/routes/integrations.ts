@@ -8,16 +8,16 @@ const integrationController = new IntegrationController();
 // All routes require authentication
 router.use(authMiddleware);
 
-// Get user's integrations
+// Get all integrations (keychain)
 router.get('/', (req, res) => integrationController.getIntegrations(req, res));
 
-// Add Google Email integration
-router.post('/gmail', (req, res) => integrationController.addGoogleEmail(req, res));
+// Get OAuth URL for adding a new account
+router.get('/add-account-url', (req, res) => integrationController.getAddAccountUrl(req, res));
 
-// Remove integration
-router.delete('/:id', (req, res) => integrationController.removeIntegration(req, res));
+// Remove an integration
+router.delete('/:integrationId', (req, res) => integrationController.removeIntegration(req, res));
 
-// Toggle integration (activate/deactivate)
-router.patch('/:id/toggle', (req, res) => integrationController.toggleIntegration(req, res));
+// Toggle integration active status
+router.patch('/:integrationId/toggle', (req, res) => integrationController.toggleIntegration(req, res));
 
 export default router;

@@ -29,6 +29,9 @@ export interface Task {
   source_id?: string;
   message_id?: string;
   user_id: string;
+  integration_id?: string;
+  account_email?: string;
+  account_name?: string;
   created_at: string;
   updated_at: string;
 }
@@ -229,6 +232,15 @@ export class DatabaseService {
       .eq('id', id);
 
     if (error) throw new Error(`Failed to delete task: ${error.message}`);
+  }
+
+  async deleteAllTasksByUserId(userId: string): Promise<void> {
+    const { error } = await supabase
+      .from('tasks')
+      .delete()
+      .eq('user_id', userId);
+
+    if (error) throw new Error(`Failed to delete all tasks for user: ${error.message}`);
   }
 
   // Integration operations

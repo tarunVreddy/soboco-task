@@ -19,14 +19,6 @@ const Integrations: React.FC = () => {
   const [integrations, setIntegrations] = useState<Integration[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [message, setMessage] = useState('');
-  const [showAddForm, setShowAddForm] = useState(false);
-  const [formData, setFormData] = useState({
-    accountName: '',
-    accountEmail: '',
-    accessToken: '',
-    refreshToken: ''
-  });
 
   useEffect(() => {
     fetchIntegrations();
@@ -46,50 +38,27 @@ const Integrations: React.FC = () => {
     }
   };
 
-  const handleAddGmail = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setError('');
-    setMessage('');
-
-    if (!formData.accountName || !formData.accountEmail || !formData.accessToken) {
-      setError('Account name, email, and access token are required');
-      return;
-    }
-
+  const handleAddAccount = async () => {
     try {
-      const response = await axios.post('/api/integrations/gmail', {
-        accountName: formData.accountName,
-        accountEmail: formData.accountEmail,
-        accessToken: formData.accessToken,
-        refreshToken: formData.refreshToken || undefined
-      }, {
+      const response = await axios.get('/api/integrations/add-account-url?provider=google', {
         headers: { Authorization: `Bearer ${token}` }
       });
-
-      setMessage(response.data.message);
-      setFormData({ accountName: '', accountEmail: '', accessToken: '', refreshToken: '' });
-      setShowAddForm(false);
-      fetchIntegrations();
+      
+      // Open the OAuth URL in a new window
+      window.open(response.data.authUrl, '_blank', 'width=600,height=700');
+      
+      // Refresh integrations after a short delay to catch the new account
+      setTimeout(() => {
+        fetchIntegrations();
+      }, 2000);
     } catch (error: any) {
-      setError(error.response?.data?.error || 'Failed to add Gmail account');
-    }
-  };
-
-  const handleToggleIntegration = async (integrationId: string, isActive: boolean) => {
-    try {
-      await axios.patch(`/api/integrations/${integrationId}/toggle`, {
-        isActive: !isActive
-      }, {
-        headers: { Authorization: `Bearer ${token}` }
-      });
-      fetchIntegrations();
-    } catch (error: any) {
-      setError(error.response?.data?.error || 'Failed to toggle integration');
+      console.error('Add account error:', error);
+      setError(error.response?.data?.error || 'Failed to get add account URL');
     }
   };
 
   const handleRemoveIntegration = async (integrationId: string) => {
-    if (!window.confirm('Are you sure you want to remove this integration?')) {
+    if (!window.confirm('Are you sure you want to remove this account? This will delete all associated data.')) {
       return;
     }
 
@@ -97,260 +66,246 @@ const Integrations: React.FC = () => {
       await axios.delete(`/api/integrations/${integrationId}`, {
         headers: { Authorization: `Bearer ${token}` }
       });
-      setMessage('Integration removed successfully');
-      fetchIntegrations();
+      
+      // Refresh integrations
+      await fetchIntegrations();
+      
+      alert('Account removed successfully!');
     } catch (error: any) {
-      setError(error.response?.data?.error || 'Failed to remove integration');
+      console.error('Remove integration error:', error);
+      setError(error.response?.data?.error || 'Failed to remove account');
+    }
+  };
+
+  const handleToggleIntegration = async (integrationId: string, isActive: boolean) => {
+    try {
+      await axios.patch(`/api/integrations/${integrationId}/toggle`, 
+        { is_active: !isActive },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      
+      // Refresh integrations
+      await fetchIntegrations();
+    } catch (error: any) {
+      console.error('Toggle integration error:', error);
+      setError(error.response?.data?.error || 'Failed to toggle account');
     }
   };
 
   const getProviderIcon = (provider: string) => {
-    switch (provider.toLowerCase()) {
-      case 'gmail':
+    switch (provider) {
+      case 'google':
+        return '📧';
+      case 'microsoft':
         return '📧';
       case 'slack':
         return '💬';
-      case 'microsoft':
-        return '📊';
       default:
         return '🔗';
     }
   };
 
   const getProviderName = (provider: string) => {
-    switch (provider.toLowerCase()) {
-      case 'gmail':
+    switch (provider) {
+      case 'google':
         return 'Gmail';
+      case 'microsoft':
+        return 'Outlook';
       case 'slack':
         return 'Slack';
-      case 'microsoft':
-        return 'Microsoft 365';
       default:
         return provider;
     }
   };
 
-  if (loading) {
-    return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary-600 mx-auto mb-4"></div>
-          <p className="text-gray-600">Loading integrations...</p>
-        </div>
-      </div>
-    );
-  }
-
   return (
     <div className="min-h-screen bg-gray-50">
       <Header />
 
-      {/* Main Content */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <div className="space-y-8">
           {/* Header Section */}
-          <div className="text-center">
-            <h2 className="text-3xl font-bold text-gray-900 mb-4">Connect Your Email Accounts</h2>
-            <p className="text-lg text-gray-600 max-w-2xl mx-auto">
-              Connect your email accounts to automatically extract tasks from your messages
-            </p>
-          </div>
-
-          {/* Messages */}
-          {message && (
-            <div className="bg-green-50 border border-green-200 text-green-700 px-4 py-3 rounded-lg">
-              {message}
-            </div>
-          )}
-          {error && (
-            <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg">
-              {error}
-            </div>
-          )}
-
-          {/* Add Integration Button */}
-          <div className="flex justify-center">
-            <button 
-              onClick={() => setShowAddForm(!showAddForm)}
-              className="bg-primary-600 text-white px-6 py-3 rounded-lg font-medium hover:bg-primary-700 transition-colors"
-            >
-              {showAddForm ? 'Cancel' : '+ Add Gmail Account'}
-            </button>
-          </div>
-
-          {/* Add Integration Form */}
-          {showAddForm && (
-            <div className="bg-white rounded-xl shadow-sm p-8">
-              <h3 className="text-2xl font-bold text-gray-900 mb-6">Add Gmail Account</h3>
-              <form onSubmit={handleAddGmail} className="space-y-6">
+          <div className="bg-white rounded-xl shadow-sm p-8">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center space-x-4">
+                <div className="text-4xl">🔑</div>
                 <div>
-                  <label htmlFor="accountName" className="block text-sm font-medium text-gray-700 mb-2">
-                    Account Name
-                  </label>
-                  <input
-                    type="text"
-                    id="accountName"
-                    value={formData.accountName}
-                    onChange={(e) => setFormData({ ...formData, accountName: e.target.value })}
-                    placeholder="e.g., Work Gmail, Personal Gmail"
-                    required
-                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent transition-colors"
-                  />
-                </div>
-
-                <div>
-                  <label htmlFor="accountEmail" className="block text-sm font-medium text-gray-700 mb-2">
-                    Gmail Address
-                  </label>
-                  <input
-                    type="email"
-                    id="accountEmail"
-                    value={formData.accountEmail}
-                    onChange={(e) => setFormData({ ...formData, accountEmail: e.target.value })}
-                    placeholder="your.email@gmail.com"
-                    required
-                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent transition-colors"
-                  />
-                </div>
-
-                <div>
-                  <label htmlFor="accessToken" className="block text-sm font-medium text-gray-700 mb-2">
-                    Access Token
-                  </label>
-                  <input
-                    type="password"
-                    id="accessToken"
-                    value={formData.accessToken}
-                    onChange={(e) => setFormData({ ...formData, accessToken: e.target.value })}
-                    placeholder="Enter your Gmail access token"
-                    required
-                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent transition-colors"
-                  />
-                  <p className="text-sm text-gray-500 mt-1">
-                    You'll need to generate this token from Google Cloud Console
+                  <h2 className="text-3xl font-bold text-gray-900">Account Keychain</h2>
+                  <p className="text-lg text-gray-600">
+                    Manage your connected accounts and add new ones to your keychain
                   </p>
                 </div>
+              </div>
+              <button
+                onClick={handleAddAccount}
+                className="bg-green-600 text-white px-6 py-3 rounded-lg text-sm font-medium hover:bg-green-700 transition-colors flex items-center space-x-2"
+              >
+                <span>+</span>
+                <span>Add Account</span>
+              </button>
+            </div>
+          </div>
 
-                <div>
-                  <label htmlFor="refreshToken" className="block text-sm font-medium text-gray-700 mb-2">
-                    Refresh Token (Optional)
-                  </label>
-                  <input
-                    type="password"
-                    id="refreshToken"
-                    value={formData.refreshToken}
-                    onChange={(e) => setFormData({ ...formData, refreshToken: e.target.value })}
-                    placeholder="Enter your Gmail refresh token"
-                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent transition-colors"
-                  />
+          {/* Error Display */}
+          {error && (
+            <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+              <div className="flex">
+                <div className="flex-shrink-0">
+                  <svg className="h-5 w-5 text-red-400" viewBox="0 0 20 20" fill="currentColor">
+                    <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
+                  </svg>
                 </div>
-
-                <div className="flex space-x-4">
-                  <button 
-                    type="submit" 
-                    className="flex-1 bg-primary-600 text-white py-3 px-4 rounded-lg font-medium hover:bg-primary-700 transition-colors"
+                <div className="ml-3">
+                  <p className="text-sm text-red-800">{error}</p>
+                </div>
+                <div className="ml-auto pl-3">
+                  <button
+                    onClick={() => setError('')}
+                    className="text-red-400 hover:text-red-600"
                   >
-                    Connect Gmail Account
-                  </button>
-                  <button 
-                    type="button" 
-                    onClick={() => setShowAddForm(false)}
-                    className="flex-1 bg-gray-300 text-gray-700 py-3 px-4 rounded-lg font-medium hover:bg-gray-400 transition-colors"
-                  >
-                    Cancel
+                    <span className="sr-only">Dismiss</span>
+                    <svg className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                      <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
+                    </svg>
                   </button>
                 </div>
-              </form>
+              </div>
             </div>
           )}
 
-          {/* Integrations List */}
-          <div className="space-y-6">
-            {integrations.length === 0 ? (
-              <div className="bg-white rounded-xl shadow-sm p-12 text-center">
-                <div className="text-6xl mb-4">📧</div>
-                <h3 className="text-xl font-semibold text-gray-900 mb-2">No email accounts connected yet</h3>
-                <p className="text-gray-600">
-                  Connect your Gmail account to start automatically extracting tasks from your emails.
+          {/* Accounts List */}
+          <div className="bg-white rounded-xl shadow-sm p-8">
+            {loading ? (
+              <div className="text-center py-12">
+                <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary-600 mx-auto"></div>
+                <p className="mt-4 text-gray-600">Loading your accounts...</p>
+              </div>
+            ) : integrations.length === 0 ? (
+              <div className="text-center py-12">
+                <div className="text-6xl mb-4">🔐</div>
+                <h3 className="text-xl font-medium text-gray-900 mb-2">No accounts connected</h3>
+                <p className="text-gray-600 mb-6 max-w-md mx-auto">
+                  Connect your first account to start managing tasks from multiple sources. 
+                  You can add Gmail, Outlook, Slack, and more.
                 </p>
+                <button
+                  onClick={handleAddAccount}
+                  className="bg-primary-600 text-white px-6 py-3 rounded-lg text-sm font-medium hover:bg-primary-700 transition-colors"
+                >
+                  Connect Your First Account
+                </button>
               </div>
             ) : (
-              <div className="space-y-4">
-                {integrations.map((integration) => (
-                  <div key={integration.id} className="bg-white rounded-xl shadow-sm p-6 hover:shadow-md transition-shadow">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center space-x-4">
-                        <div className="text-2xl">{getProviderIcon(integration.provider)}</div>
-                        <div>
-                          <h4 className="font-semibold text-gray-900">{integration.account_name}</h4>
-                          <p className="text-gray-600">{integration.account_email}</p>
-                          <p className="text-sm text-gray-500">
-                            Connected: {new Date(integration.created_at).toLocaleDateString()}
-                          </p>
+              <div className="space-y-6">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-xl font-semibold text-gray-900">
+                    Connected Accounts ({integrations.length})
+                  </h3>
+                  <div className="text-sm text-gray-500">
+                    {integrations.filter(i => i.is_active).length} active
+                  </div>
+                </div>
+
+                <div className="grid gap-4">
+                  {integrations.map((integration) => (
+                    <div key={integration.id} className="border border-gray-200 rounded-lg p-6 hover:shadow-sm transition-shadow">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center space-x-4">
+                          <div className="text-3xl">
+                            {getProviderIcon(integration.provider)}
+                          </div>
+                          <div className="flex-1">
+                            <div className="flex items-center space-x-3">
+                              <h4 className="font-medium text-gray-900">{integration.account_name}</h4>
+                              <span className="text-sm text-gray-500">
+                                ({getProviderName(integration.provider)})
+                              </span>
+                            </div>
+                            <p className="text-sm text-gray-600 mt-1">{integration.account_email}</p>
+                            {integration.metadata?.messagesTotal && (
+                              <p className="text-xs text-gray-500 mt-1">
+                                {integration.metadata.messagesTotal.toLocaleString()} total messages
+                              </p>
+                            )}
+                            <p className="text-xs text-gray-400 mt-1">
+                              Connected {new Date(integration.created_at).toLocaleDateString()}
+                            </p>
+                          </div>
+                        </div>
+                        
+                        <div className="flex items-center space-x-3">
+                          <button
+                            onClick={() => handleToggleIntegration(integration.id, integration.is_active)}
+                            className={`px-4 py-2 rounded text-sm font-medium transition-colors ${
+                              integration.is_active 
+                                ? 'bg-green-100 text-green-800 hover:bg-green-200' 
+                                : 'bg-gray-100 text-gray-800 hover:bg-gray-200'
+                            }`}
+                          >
+                            {integration.is_active ? 'Active' : 'Inactive'}
+                          </button>
+                          
+                          <button
+                            onClick={() => handleRemoveIntegration(integration.id)}
+                            className="text-red-600 hover:text-red-800 text-sm font-medium px-3 py-2 rounded hover:bg-red-50 transition-colors"
+                          >
+                            Remove
+                          </button>
                         </div>
                       </div>
                       
-                      <div className="flex items-center space-x-3">
-                        <span className={`px-3 py-1 rounded-full text-sm font-medium ${
-                          integration.is_active 
-                            ? 'bg-green-100 text-green-800' 
-                            : 'bg-gray-100 text-gray-800'
-                        }`}>
-                          {integration.is_active ? 'Active' : 'Inactive'}
-                        </span>
-                        <button
-                          onClick={() => handleToggleIntegration(integration.id, integration.is_active)}
-                          className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
-                            integration.is_active
-                              ? 'bg-red-100 text-red-700 hover:bg-red-200'
-                              : 'bg-green-100 text-green-700 hover:bg-green-200'
-                          }`}
-                        >
-                          {integration.is_active ? 'Deactivate' : 'Activate'}
-                        </button>
-                        <button
-                          onClick={() => handleRemoveIntegration(integration.id)}
-                          className="px-3 py-2 rounded-lg text-sm font-medium bg-red-100 text-red-700 hover:bg-red-200 transition-colors"
-                        >
-                          Remove
-                        </button>
-                      </div>
+                      {integration.metadata?.error && (
+                        <div className="mt-3 p-3 bg-yellow-50 border border-yellow-200 rounded-md">
+                          <div className="flex items-center space-x-2">
+                            <svg className="h-4 w-4 text-yellow-400" fill="currentColor" viewBox="0 0 20 20">
+                              <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+                            </svg>
+                            <span className="text-sm text-yellow-800">
+                              Connection issue: {integration.metadata.error}
+                            </span>
+                          </div>
+                        </div>
+                      )}
                     </div>
-                  </div>
-                ))}
+                  ))}
+                </div>
+
+                {/* Add More Accounts */}
+                <div className="border-2 border-dashed border-gray-300 rounded-lg p-6 text-center">
+                  <div className="text-2xl mb-2">➕</div>
+                  <h4 className="text-lg font-medium text-gray-900 mb-2">Add Another Account</h4>
+                  <p className="text-gray-600 mb-4">
+                    Connect more accounts to manage tasks from multiple sources
+                  </p>
+                  <button
+                    onClick={handleAddAccount}
+                    className="bg-gray-100 text-gray-700 px-4 py-2 rounded-lg text-sm font-medium hover:bg-gray-200 transition-colors"
+                  >
+                    + Add Account
+                  </button>
+                </div>
               </div>
             )}
           </div>
 
           {/* Help Section */}
-          <div className="bg-blue-50 rounded-xl p-8">
-            <h3 className="text-xl font-semibold text-gray-900 mb-4">How to get Gmail Access Token</h3>
-            <ol className="space-y-2 text-gray-700 mb-4">
-              <li className="flex items-start">
-                <span className="text-blue-600 font-medium mr-2">1.</span>
-                Go to <a href="https://console.cloud.google.com/" target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">Google Cloud Console</a>
-              </li>
-              <li className="flex items-start">
-                <span className="text-blue-600 font-medium mr-2">2.</span>
-                Create a new project or select an existing one
-              </li>
-              <li className="flex items-start">
-                <span className="text-blue-600 font-medium mr-2">3.</span>
-                Enable the Gmail API
-              </li>
-              <li className="flex items-start">
-                <span className="text-blue-600 font-medium mr-2">4.</span>
-                Create OAuth 2.0 credentials
-              </li>
-              <li className="flex items-start">
-                <span className="text-blue-600 font-medium mr-2">5.</span>
-                Generate an access token using the OAuth 2.0 playground
-              </li>
-              <li className="flex items-start">
-                <span className="text-blue-600 font-medium mr-2">6.</span>
-                Copy the access token and paste it above
-              </li>
-            </ol>
+          <div className="bg-blue-50 border border-blue-200 rounded-lg p-6">
+            <div className="flex items-start space-x-3">
+              <div className="flex-shrink-0">
+                <svg className="h-6 w-6 text-blue-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+              </div>
+              <div>
+                <h4 className="text-lg font-medium text-blue-900">How it works</h4>
+                <ul className="mt-2 text-sm text-blue-800 space-y-1">
+                  <li>• Connect multiple Gmail accounts to your keychain</li>
+                  <li>• Each account's messages will be scanned for tasks</li>
+                  <li>• Toggle accounts on/off without removing them</li>
+                  <li>• All connected accounts are managed from one place</li>
+                </ul>
+              </div>
+            </div>
           </div>
         </div>
       </main>

@@ -1,6 +1,6 @@
 import { DatabaseService, Task } from '../database/DatabaseService';
 import { GmailService } from '../gmail/GmailService';
-import { OllamaProvider } from '../../ai/providers/ollama';
+import { OllamaProvider, BatchMessage } from '../../ai/providers/ollama';
 
 export class TaskService {
   private databaseService: DatabaseService;
@@ -11,7 +11,7 @@ export class TaskService {
     this.ollamaProvider = new OllamaProvider();
   }
 
-    async parseGmailForTasks(userId: string, integrationId: string): Promise<{ extracted: number; created: number; processed: number }> {
+  async parseGmailForTasks(userId: string, integrationId: string): Promise<{ extracted: number; created: number; processed: number }> {
     try {
       // Get the Gmail integration
       const integration = await this.databaseService.findIntegrationById(integrationId);
@@ -33,35 +33,62 @@ export class TaskService {
       let createdCount = 0;
       let processedCount = 0;
 
-      // Process each message
+      // Filter out already parsed messages
+      const unparsedMessages = [];
       for (const message of messages) {
+        const isAlreadyParsed = await this.databaseService.isMessageParsed(userId, integrationId, message.id);
+        if (!isAlreadyParsed) {
+          unparsedMessages.push(message);
+        } else {
+          console.log(`Message ${message.id} already parsed, skipping`);
+        }
+      }
+
+      if (unparsedMessages.length === 0) {
+        console.log('No new messages to process');
+        return { extracted: 0, created: 0, processed: 0 };
+      }
+
+      console.log(`🔍 [DEBUG] Processing ${unparsedMessages.length} unparsed messages`);
+
+      // Prepare batch messages for AI processing
+      const batchMessages: BatchMessage[] = unparsedMessages.map(message => {
+        const content = gmailService.extractEmailContent(message);
+        const subject = gmailService.getSubject(message);
+        const sender = gmailService.getSenderEmail(message);
+        
+        // Combine subject and content for AI analysis
+        const fullContent = `Subject: ${subject}\nFrom: ${sender}\n\n${content}`;
+        
+        return {
+          id: message.id,
+          content: fullContent,
+          subject,
+          sender
+        };
+      });
+
+      // Process messages in batch using AI
+      console.log(`🔍 [DEBUG] Starting batch processing of ${batchMessages.length} messages`);
+      const batchResults = await this.ollamaProvider.extractTasksBatch(batchMessages);
+      console.log(`🔍 [DEBUG] Batch processing completed. Got results for ${batchResults.length} messages`);
+
+      // Process results and create tasks
+      for (const batchResult of batchResults) {
         try {
-          // Check if message has already been parsed
-          const isAlreadyParsed = await this.databaseService.isMessageParsed(userId, integrationId, message.id);
-          if (isAlreadyParsed) {
-            console.log(`Message ${message.id} already parsed, skipping`);
+          const { messageId, result } = batchResult;
+          const message = unparsedMessages.find(m => m.id === messageId);
+          
+          if (!message) {
+            console.warn(`Message ${messageId} not found in original messages`);
             continue;
           }
 
-          // Extract content from the message
-          const content = gmailService.extractEmailContent(message);
-          const subject = gmailService.getSubject(message);
-          const sender = gmailService.getSenderEmail(message);
-
-          // Create Gmail message URL
-          const gmailUrl = `https://mail.google.com/mail/u/0/#inbox/${message.id}`;
-
-          // Combine subject and content for AI analysis
-          const fullContent = `Subject: ${subject}\nFrom: ${sender}\n\n${content}`;
-
-          // Use Ollama to extract tasks
-          const extractionResult = await this.ollamaProvider.extractTasks(fullContent);
-
-          extractedCount += extractionResult.tasks.length;
+          extractedCount += result.tasks.length;
           processedCount++;
 
           // Create tasks in database
-          for (const aiTask of extractionResult.tasks) {
+          for (const aiTask of result.tasks) {
             // Validate and parse due date
             let dueDate: string | undefined = undefined;
             if (aiTask.dueDate) {
@@ -83,6 +110,9 @@ export class TaskService {
 
             const taskData: Omit<Task, 'id' | 'created_at' | 'updated_at'> = {
               user_id: userId,
+              integration_id: integration.id,
+              account_email: integration.account_email,
+              account_name: integration.account_name,
               title: aiTask.title,
               description: aiTask.description,
               priority: aiTask.priority || 'MEDIUM',
@@ -101,15 +131,16 @@ export class TaskService {
             user_id: userId,
             integration_id: integrationId,
             gmail_message_id: message.id,
-            tasks_extracted: extractionResult.tasks.length,
+            tasks_extracted: result.tasks.length,
           });
 
         } catch (error) {
-          console.error(`Error processing message ${message.id}:`, error);
-          // Continue with next message
+          console.error(`Error processing batch result for message ${batchResult.messageId}:`, error);
+          // Continue with next result
         }
       }
 
+      console.log(`🔍 [DEBUG] Task extraction completed: ${extractedCount} tasks extracted, ${createdCount} tasks created, ${processedCount} messages processed`);
       return { extracted: extractedCount, created: createdCount, processed: processedCount };
     } catch (error) {
       console.error('Error parsing Gmail for tasks:', error);
@@ -130,8 +161,16 @@ export class TaskService {
   }
 
   async resetMessageTracking(userId: string, integrationId: string): Promise<void> {
-    // Clear parsed messages tracking for this integration
-    await this.databaseService.clearParsedMessages(userId, integrationId);
+    // Delete all tasks for this user (across all accounts)
+    await this.databaseService.deleteAllTasksByUserId(userId);
+    
+    // Clear parsed messages tracking for ALL integrations for this user
+    const integrations = await this.databaseService.findIntegrationsByUserId(userId);
+    for (const integration of integrations) {
+      await this.databaseService.clearParsedMessages(userId, integration.id);
+    }
+    
+    console.log(`🔍 [DEBUG] Reset completed for user ${userId}: deleted all tasks and cleared parsed messages for all ${integrations.length} integrations`);
   }
 
   async getUnparsedMessageCount(userId: string, integrationId: string): Promise<number> {

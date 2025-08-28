@@ -55,6 +55,7 @@ CREATE TABLE IF NOT EXISTS tasks (
     source_id VARCHAR(255),
     message_id UUID,
     user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    integration_id UUID REFERENCES integrations(id) ON DELETE CASCADE,
     account_email VARCHAR(255),
     account_name VARCHAR(255),
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
@@ -95,6 +96,7 @@ CREATE INDEX IF NOT EXISTS idx_sessions_token ON sessions(token);
 CREATE INDEX IF NOT EXISTS idx_sessions_user_id ON sessions(user_id);
 CREATE INDEX IF NOT EXISTS idx_tasks_user_id ON tasks(user_id);
 CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);
+CREATE INDEX IF NOT EXISTS idx_tasks_integration_id ON tasks(integration_id);
 CREATE INDEX IF NOT EXISTS idx_integrations_user_id ON integrations(user_id);
 CREATE INDEX IF NOT EXISTS idx_integrations_provider ON integrations(provider);
 CREATE INDEX IF NOT EXISTS idx_integrations_account_email ON integrations(account_email);

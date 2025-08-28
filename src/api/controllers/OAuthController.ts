@@ -24,6 +24,20 @@ export class OAuthController {
         return;
       }
 
+      // Parse state parameter to determine action
+      let action = 'login';
+      let currentUserId: string | undefined;
+      
+      if (state) {
+        try {
+          const stateData = JSON.parse(state as string);
+          action = stateData.action || 'login';
+          currentUserId = stateData.currentUserId;
+        } catch (error) {
+          console.log('Invalid state parameter, using default action: login');
+        }
+      }
+
       // Exchange code for tokens
       console.log('Exchanging code for tokens...');
       const tokenResponse = await axios.post('https://oauth2.googleapis.com/token', {
@@ -47,31 +61,60 @@ export class OAuthController {
 
       const { id: google_id, email, name, picture } = userInfoResponse.data;
 
-      // Create or update user in our database
-      const authResult = await this.authService.findOrCreateUserBySocialId(
-        'google',
-        google_id,
-        email,
-        name
-      );
+      let authResult: { user: any; token: string };
 
-      // Check if Gmail integration already exists for this user
+      // Handle different actions
+      if (action === 'add-account' && currentUserId) {
+        // For adding additional account, use the current user ID
+        const currentUser = await this.databaseService.findUserById(currentUserId);
+        if (!currentUser) {
+          throw new Error('Current user not found');
+        }
+        
+        // Use the current user's account
+        const token = await this.authService.createSession(currentUser.id);
+        authResult = { user: currentUser, token };
+        console.log('Adding additional account to existing user:', currentUser.id);
+      } else {
+        // For login or when no current user ID, use the existing logic
+        authResult = await this.authService.findOrCreateUserBySocialId(
+          'google',
+          google_id,
+          email,
+          name
+        );
+      }
+
+      // Check if Gmail integration already exists for this user and email
       const existingIntegrations = await this.databaseService.findIntegrationsByProvider(
         authResult.user.id,
         'google'
       );
 
-      const hasGmailIntegration = existingIntegrations.some(
+      const existingIntegration = existingIntegrations.find(
         integration => integration.account_email === email
       );
 
-      // If no Gmail integration exists, create one automatically
-      if (!hasGmailIntegration) {
-        console.log('Creating Gmail integration for user:', authResult.user.id);
+      if (existingIntegration) {
+        console.log('Gmail integration already exists for user:', authResult.user.id);
+        // Update the existing integration with new tokens
+        await this.databaseService.updateIntegration(existingIntegration.id, {
+          access_token,
+          refresh_token,
+          metadata: {
+            ...existingIntegration.metadata,
+            picture,
+            google_id,
+          },
+        });
+        console.log('Gmail integration updated with new tokens');
+      } else {
+        console.log('Creating new Gmail integration for user:', authResult.user.id);
+        // Create a new Gmail integration
         await this.databaseService.createIntegration({
           user_id: authResult.user.id,
           provider: 'google',
-          account_name: name || 'My Gmail',
+          account_name: name || `Gmail (${email})`,
           account_email: email,
           access_token,
           refresh_token,
@@ -81,29 +124,11 @@ export class OAuthController {
             google_id,
           },
         });
-        console.log('Gmail integration created successfully');
-      } else {
-        console.log('Gmail integration already exists for user:', authResult.user.id);
-        // Update the existing integration with new tokens
-        const existingIntegration = existingIntegrations.find(
-          integration => integration.account_email === email
-        );
-        if (existingIntegration) {
-          await this.databaseService.updateIntegration(existingIntegration.id, {
-            access_token,
-            refresh_token,
-            metadata: {
-              ...existingIntegration.metadata,
-              picture,
-              google_id,
-            },
-          });
-          console.log('Gmail integration updated with new tokens');
-        }
+        console.log('New Gmail integration created successfully');
       }
 
-      // Redirect to frontend OAuth callback with token
-      const redirectUrl = `${process.env.FRONTEND_URL || 'http://localhost:3000'}/oauth-callback?token=${authResult.token}`;
+      // Redirect to frontend OAuth callback with token and action
+      const redirectUrl = `${process.env.FRONTEND_URL || 'http://localhost:3000'}/oauth-callback?token=${authResult.token}&action=${action}`;
       console.log('Redirecting to:', redirectUrl);
       res.redirect(redirectUrl);
     } catch (error) {
@@ -117,6 +142,11 @@ export class OAuthController {
 
   async getGoogleAuthUrl(req: Request, res: Response): Promise<void> {
     try {
+      const { action = 'login', currentUserId } = req.query;
+      
+      // Create state parameter to track the action
+      const state = JSON.stringify({ action, currentUserId });
+      
       // Use Gmail scopes for inbox access
       const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?` +
         `client_id=${process.env.GOOGLE_CLIENT_ID}` +
@@ -124,7 +154,8 @@ export class OAuthController {
         `&response_type=code` +
         `&scope=${encodeURIComponent('https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/gmail.modify https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile')}` +
         `&access_type=offline` +
-        `&prompt=consent`;
+        `&prompt=consent` +
+        `&state=${encodeURIComponent(state)}`;
 
       res.json({ authUrl });
     } catch (error) {

@@ -30,11 +30,21 @@ export interface GmailProfile {
   historyId: string;
 }
 
+export interface TokenRefreshResult {
+  accessToken: string;
+  refreshToken?: string;
+  expiresIn: number;
+}
+
 export class GmailService {
   private accessToken: string;
+  private refreshToken?: string;
+  private onTokenRefresh?: (result: TokenRefreshResult) => Promise<void>;
 
-  constructor(accessToken: string) {
+  constructor(accessToken: string, refreshToken?: string, onTokenRefresh?: (result: TokenRefreshResult) => Promise<void>) {
     this.accessToken = accessToken;
+    this.refreshToken = refreshToken;
+    this.onTokenRefresh = onTokenRefresh;
   }
 
   private getHeaders() {
@@ -44,21 +54,83 @@ export class GmailService {
     };
   }
 
-  async getProfile(): Promise<GmailProfile> {
+  private async refreshAccessToken(): Promise<string> {
+    if (!this.refreshToken) {
+      throw new Error('No refresh token available');
+    }
+
     try {
+      console.log('🔄 Refreshing access token...');
+      
+      const response = await axios.post('https://oauth2.googleapis.com/token', {
+        client_id: process.env.GOOGLE_CLIENT_ID,
+        client_secret: process.env.GOOGLE_CLIENT_SECRET,
+        refresh_token: this.refreshToken,
+        grant_type: 'refresh_token',
+      });
+
+      const { access_token, refresh_token, expires_in } = response.data;
+      
+      // Update the access token
+      this.accessToken = access_token;
+      
+      // If a new refresh token is provided, update it
+      if (refresh_token) {
+        this.refreshToken = refresh_token;
+      }
+
+      // Notify the callback if provided
+      if (this.onTokenRefresh) {
+        await this.onTokenRefresh({
+          accessToken: access_token,
+          refreshToken: refresh_token,
+          expiresIn: expires_in,
+        });
+      }
+
+      console.log('✅ Access token refreshed successfully');
+      return access_token;
+    } catch (error) {
+      console.error('❌ Failed to refresh access token:', error);
+      throw new Error('Failed to refresh access token');
+    }
+  }
+
+  private async makeAuthenticatedRequest<T>(requestFn: () => Promise<T>): Promise<T> {
+    try {
+      return await requestFn();
+    } catch (error) {
+      if (axios.isAxiosError(error)) {
+        if (error.response?.status === 401) {
+          console.log('🔄 401 Unauthorized, attempting token refresh...');
+          
+          // Try to refresh the token
+          await this.refreshAccessToken();
+          
+          // Retry the request with the new token
+          return await requestFn();
+        } else if (error.response?.status === 429) {
+          console.log('⏳ 429 Rate limited, waiting 5 seconds before retry...');
+          await new Promise(resolve => setTimeout(resolve, 5000));
+          return await requestFn();
+        }
+      }
+      throw error;
+    }
+  }
+
+  async getProfile(): Promise<GmailProfile> {
+    return this.makeAuthenticatedRequest(async () => {
       const response = await axios.get(
         'https://gmail.googleapis.com/gmail/v1/users/me/profile',
         { headers: this.getHeaders() }
       );
       return response.data;
-    } catch (error) {
-      console.error('Error fetching Gmail profile:', error);
-      throw new Error('Failed to fetch Gmail profile');
-    }
+    });
   }
 
   async getInboxMessageCount(): Promise<number> {
-    try {
+    return this.makeAuthenticatedRequest(async () => {
       console.log('🔍 [DEBUG] Getting inbox message count...');
       
       // Get all inbox messages (up to a reasonable limit)
@@ -75,19 +147,11 @@ export class GmailService {
       console.log('🔍 [DEBUG] Actual message count:', count);
       
       return count;
-    } catch (error) {
-      console.error('❌ [DEBUG] Error fetching inbox message count:', error);
-      if (axios.isAxiosError(error)) {
-        console.error('❌ [DEBUG] Axios error response:', error.response?.data);
-        console.error('❌ [DEBUG] Axios error status:', error.response?.status);
-        console.error('❌ [DEBUG] Axios error headers:', error.response?.headers);
-      }
-      throw new Error('Failed to fetch inbox message count');
-    }
+    });
   }
 
   async getMessages(maxResults: number = 10, query?: string): Promise<GmailMessage[]> {
-    try {
+    return this.makeAuthenticatedRequest(async () => {
       let url = `https://gmail.googleapis.com/gmail/v1/users/me/messages?maxResults=${maxResults}`;
       if (query) {
         url += `&q=${encodeURIComponent(query)}`;
@@ -105,23 +169,17 @@ export class GmailService {
       );
 
       return await Promise.all(messagePromises);
-    } catch (error) {
-      console.error('Error fetching Gmail messages:', error);
-      throw new Error('Failed to fetch Gmail messages');
-    }
+    });
   }
 
   async getMessage(messageId: string): Promise<GmailMessage> {
-    try {
+    return this.makeAuthenticatedRequest(async () => {
       const response = await axios.get(
         `https://gmail.googleapis.com/gmail/v1/users/me/messages/${messageId}`,
         { headers: this.getHeaders() }
       );
       return response.data;
-    } catch (error) {
-      console.error('Error fetching Gmail message:', error);
-      throw new Error('Failed to fetch Gmail message');
-    }
+    });
   }
 
   async searchMessages(query: string, maxResults: number = 10): Promise<GmailMessage[]> {

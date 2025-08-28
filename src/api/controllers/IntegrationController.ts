@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
 import { DatabaseService } from '../../services/database/DatabaseService';
+import { GmailService } from '../../services/gmail/GmailService';
 
 export class IntegrationController {
   private databaseService: DatabaseService;
@@ -8,68 +9,96 @@ export class IntegrationController {
     this.databaseService = new DatabaseService();
   }
 
+  /**
+   * Get all integrations for the current user (keychain)
+   */
   async getIntegrations(req: Request, res: Response): Promise<void> {
     try {
       const user = (req as any).user;
+      
+      // Get all integrations for the user
       const integrations = await this.databaseService.findIntegrationsByUserId(user.id);
-      res.status(200).json({ integrations });
+      
+      // Get detailed information for each integration
+      const detailedIntegrations = await Promise.all(integrations.map(async (integration) => {
+        try {
+                     if (integration.provider === 'google') {
+             // Get Gmail profile information
+             const gmailService = new GmailService(integration.access_token);
+
+             const profile = await gmailService.getProfile();
+             const messageCount = await gmailService.getInboxMessageCount();
+            
+            return {
+              id: integration.id,
+              provider: integration.provider,
+              account_name: integration.account_name,
+              account_email: integration.account_email,
+              is_active: integration.is_active,
+              created_at: integration.created_at,
+              updated_at: integration.updated_at,
+              metadata: {
+                ...integration.metadata,
+                messagesTotal: profile.messagesTotal,
+                inboxCount: messageCount,
+                isConnected: true
+              }
+            };
+          } else {
+            // For other providers, return basic info
+            return {
+              id: integration.id,
+              provider: integration.provider,
+              account_name: integration.account_name,
+              account_email: integration.account_email,
+              is_active: integration.is_active,
+              created_at: integration.created_at,
+              updated_at: integration.updated_at,
+              metadata: {
+                ...integration.metadata,
+                isConnected: false
+              }
+            };
+          }
+        } catch (error) {
+          console.error(`Error getting details for integration ${integration.id}:`, error);
+          return {
+            id: integration.id,
+            provider: integration.provider,
+            account_name: integration.account_name,
+            account_email: integration.account_email,
+            is_active: integration.is_active,
+            created_at: integration.created_at,
+            updated_at: integration.updated_at,
+            metadata: {
+              ...integration.metadata,
+              isConnected: false,
+              error: 'Failed to connect'
+            }
+          };
+        }
+      }));
+
+      res.status(200).json({ 
+        integrations: detailedIntegrations,
+        totalAccounts: detailedIntegrations.length,
+        activeAccounts: detailedIntegrations.filter(i => i.is_active).length
+      });
     } catch (error) {
       console.error('Get integrations error:', error);
       res.status(500).json({ error: 'Failed to fetch integrations' });
     }
   }
 
-  async addGoogleEmail(req: Request, res: Response): Promise<void> {
-    try {
-      const user = (req as any).user;
-      const { accountName, accountEmail, accessToken, refreshToken } = req.body;
-
-      if (!accountName || !accountEmail || !accessToken) {
-        res.status(400).json({ error: 'Account name, email, and access token are required' });
-        return;
-      }
-
-      // Check if this specific email is already connected for this user
-      const existingIntegrations = await this.databaseService.findIntegrationsByProvider(user.id, 'google');
-      const existingGoogle = existingIntegrations.find(integration => 
-        integration.account_email === accountEmail
-      );
-
-      if (existingGoogle) {
-        res.status(400).json({ error: 'This Gmail account is already connected' });
-        return;
-      }
-
-      const integration = await this.databaseService.createIntegration({
-        user_id: user.id,
-        provider: 'google',
-        account_name: accountName,
-        account_email: accountEmail,
-        access_token: accessToken,
-        refresh_token: refreshToken,
-        is_active: true,
-        metadata: {
-          connected_at: new Date().toISOString(),
-          provider_version: 'gmail-api-v1'
-        }
-      });
-
-      res.status(201).json({ 
-        message: 'Gmail account connected successfully',
-        integration 
-      });
-    } catch (error) {
-      console.error('Add Google Email error:', error);
-      res.status(500).json({ error: 'Failed to connect Gmail account' });
-    }
-  }
-
+  /**
+   * Remove an integration from the keychain
+   */
   async removeIntegration(req: Request, res: Response): Promise<void> {
     try {
       const user = (req as any).user;
-      const { id } = req.params;
+      const { integrationId } = req.params;
 
-      const integration = await this.databaseService.findIntegrationById(id);
+      const integration = await this.databaseService.findIntegrationById(integrationId);
       
       if (!integration) {
         res.status(404).json({ error: 'Integration not found' });
@@ -81,7 +110,7 @@ export class IntegrationController {
         return;
       }
 
-      await this.databaseService.deleteIntegration(id);
+      await this.databaseService.deleteIntegration(integrationId);
       res.status(200).json({ message: 'Integration removed successfully' });
     } catch (error) {
       console.error('Remove integration error:', error);
@@ -89,13 +118,16 @@ export class IntegrationController {
     }
   }
 
+  /**
+   * Toggle integration active status
+   */
   async toggleIntegration(req: Request, res: Response): Promise<void> {
     try {
       const user = (req as any).user;
-      const { id } = req.params;
-      const { isActive } = req.body;
+      const { integrationId } = req.params;
+      const { is_active } = req.body;
 
-      const integration = await this.databaseService.findIntegrationById(id);
+      const integration = await this.databaseService.findIntegrationById(integrationId);
       
       if (!integration) {
         res.status(404).json({ error: 'Integration not found' });
@@ -107,17 +139,46 @@ export class IntegrationController {
         return;
       }
 
-      const updatedIntegration = await this.databaseService.updateIntegration(id, {
-        is_active: isActive
-      });
-
-      res.status(200).json({ 
-        message: `Integration ${isActive ? 'activated' : 'deactivated'} successfully`,
-        integration: updatedIntegration 
-      });
+      await this.databaseService.updateIntegration(integrationId, { is_active });
+      res.status(200).json({ message: 'Integration updated successfully' });
     } catch (error) {
       console.error('Toggle integration error:', error);
       res.status(500).json({ error: 'Failed to update integration' });
+    }
+  }
+
+  /**
+   * Get OAuth URL for adding a new account
+   */
+  async getAddAccountUrl(req: Request, res: Response): Promise<void> {
+    try {
+      const user = (req as any).user;
+      const { provider = 'google' } = req.query;
+
+      if (provider !== 'google') {
+        res.status(400).json({ error: 'Only Google provider is supported' });
+        return;
+      }
+
+      // Create state parameter for adding account
+      const state = JSON.stringify({ 
+        action: 'add-account', 
+        currentUserId: user.id 
+      });
+
+      const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?` +
+        `client_id=${process.env.GOOGLE_CLIENT_ID}` +
+        `&redirect_uri=${encodeURIComponent(process.env.GOOGLE_REDIRECT_URI || 'http://localhost:3000/auth/google/callback')}` +
+        `&response_type=code` +
+        `&scope=${encodeURIComponent('https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/gmail.modify https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile')}` +
+        `&access_type=offline` +
+        `&prompt=consent` +
+        `&state=${encodeURIComponent(state)}`;
+
+      res.json({ authUrl });
+    } catch (error) {
+      console.error('Error generating add account URL:', error);
+      res.status(500).json({ error: 'Failed to generate add account URL' });
     }
   }
 }

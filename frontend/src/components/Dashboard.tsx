@@ -13,18 +13,38 @@ interface Task {
   due_date?: string;
   source: string;
   source_id?: string;
+  integration_id?: string;
+  account_email?: string;
+  account_name?: string;
   created_at: string;
+}
+
+interface GmailAccountCounts {
+  integrationId: string;
+  accountName: string;
+  accountEmail: string;
+  isActive: boolean;
+  error?: string;
+  counts: {
+    totalMessages: number;
+    parsedMessages: number;
+    unparsedMessages: number;
+  };
+}
+
+interface GmailMessageCounts {
+  accounts: GmailAccountCounts[];
+  totals: {
+    totalMessages: number;
+    parsedMessages: number;
+    unparsedMessages: number;
+    activeAccounts: number;
+  };
 }
 
 const Dashboard: React.FC = () => {
   const { token } = useAuth();
-  const [gmailData, setGmailData] = useState<{
-    messagesTotal: number;
-    email: string;
-    accountName: string;
-    isConnected: boolean;
-    integrationId?: string;
-  } | null>(null);
+  const [gmailData, setGmailData] = useState<GmailMessageCounts | null>(null);
   const [tasks, setTasks] = useState<Task[]>([]);
   const [loading, setLoading] = useState(true);
   const [parsingTasks, setParsingTasks] = useState(false);
@@ -33,32 +53,17 @@ const Dashboard: React.FC = () => {
 
 
 
+
   const fetchGmailData = async () => {
     try {
       setLoading(true);
-      const response = await axios.get('/api/gmail/profile', {
+      const response = await axios.get('/api/gmail/message-counts', {
         headers: { Authorization: `Bearer ${token}` }
       });
-      setGmailData({
-        messagesTotal: response.data.profile.messagesTotal,
-        email: response.data.profile.emailAddress,
-        accountName: response.data.integration?.account_name || 'Gmail',
-        isConnected: true,
-        integrationId: response.data.integration?.id
-      });
+      setGmailData(response.data);
     } catch (error: any) {
-      if (error.response?.status === 400 && error.response?.data?.error?.includes('Gmail integration not found')) {
-        // Gmail not connected - this is expected
-        setGmailData({
-          messagesTotal: 0,
-          email: '',
-          accountName: '',
-          isConnected: false
-        });
-      } else {
-        console.error('Gmail API error:', error);
-        setError('Failed to fetch Gmail data');
-      }
+      console.error('Gmail API error:', error);
+      setError('Failed to fetch Gmail data');
     } finally {
       setLoading(false);
     }
@@ -82,9 +87,11 @@ const Dashboard: React.FC = () => {
     }
   };
 
+
+
   const handleParseTasks = async () => {
-    if (!gmailData?.integrationId) {
-      setError('No Gmail integration found');
+    if (!gmailData?.accounts || gmailData.accounts.length === 0) {
+      setError('No Gmail accounts found');
       return;
     }
 
@@ -92,16 +99,46 @@ const Dashboard: React.FC = () => {
     setError('');
 
     try {
-      const response = await axios.post('/api/tasks/parse-gmail', 
-        { integrationId: gmailData.integrationId },
-        { headers: { Authorization: `Bearer ${token}` } }
-      );
+      // Parse tasks for ALL accounts (not just active ones)
+      const allAccounts = gmailData.accounts;
+      
+      console.log(`🔍 [DEBUG] Found ${gmailData.accounts.length} total accounts`);
+      console.log(`🔍 [DEBUG] Full account data:`, JSON.stringify(gmailData.accounts, null, 2));
+      
+      allAccounts.forEach(account => {
+        console.log(`🔍 [DEBUG] Account: ${account.accountEmail} (${account.integrationId}) - Active: ${account.isActive}`);
+      });
+      
+      for (const account of allAccounts) {
+        try {
+          console.log(`🔍 [DEBUG] Parsing tasks for account: ${account.accountEmail} (${account.integrationId})`);
+          const response = await axios.post('/api/tasks/parse-gmail', 
+            { integrationId: account.integrationId },
+            { headers: { Authorization: `Bearer ${token}` } }
+          );
+          console.log(`✅ [DEBUG] Successfully parsed tasks for account: ${account.accountEmail}`, response.data);
+          
+          // Add delay between accounts to avoid rate limiting
+          if (allAccounts.indexOf(account) < allAccounts.length - 1) {
+            console.log(`⏳ [DEBUG] Waiting 2 seconds before processing next account...`);
+            await new Promise(resolve => setTimeout(resolve, 2000));
+          }
+        } catch (error: any) {
+          console.error(`❌ [DEBUG] Error parsing tasks for account ${account.accountEmail}:`, error);
+          
+          // If we get a 429 error, wait longer before continuing
+          if (error.response?.status === 429) {
+            console.log(`⏳ [DEBUG] Rate limited! Waiting 10 seconds before continuing...`);
+            await new Promise(resolve => setTimeout(resolve, 10000));
+          }
+        }
+      }
       
       // Refresh tasks and Gmail data after parsing
       await fetchTasks();
       await fetchGmailData();
       
-      alert(`Parsing completed! Processed ${response.data.processed} messages, extracted ${response.data.extracted} tasks, created ${response.data.created} new tasks.`);
+      alert('Parsing completed for all accounts!');
     } catch (error: any) {
       setError(error.response?.data?.error || 'Failed to parse tasks');
     } finally {
@@ -110,12 +147,12 @@ const Dashboard: React.FC = () => {
   };
 
   const handleResetTracking = async () => {
-    if (!gmailData?.integrationId) {
-      setError('No Gmail integration found');
+    if (!gmailData?.accounts || gmailData.accounts.length === 0) {
+      setError('No Gmail accounts found');
       return;
     }
 
-    if (!window.confirm('This will reset message tracking. The next time you parse for tasks, it will process all messages again. Continue?')) {
+    if (!window.confirm('This will delete ALL existing tasks and reset message tracking for ALL accounts in your keychain. The next time you parse for tasks, it will process all messages from all accounts again. This action cannot be undone. Continue?')) {
       return;
     }
 
@@ -123,21 +160,34 @@ const Dashboard: React.FC = () => {
     setError('');
 
     try {
-      const response = await axios.post('/api/tasks/reset-tracking', 
-        { integrationId: gmailData.integrationId },
-        { headers: { Authorization: `Bearer ${token}` } }
-      );
+      // Reset tracking for all accounts
+      const activeAccounts = gmailData.accounts.filter(account => account.isActive);
       
-      alert(response.data.message);
+      for (const account of activeAccounts) {
+        try {
+          await axios.post('/api/tasks/reset-tracking', 
+            { integrationId: account.integrationId },
+            { headers: { Authorization: `Bearer ${token}` } }
+          );
+        } catch (error) {
+          console.error(`Error resetting tracking for account ${account.accountEmail}:`, error);
+        }
+      }
+      
+      alert('All tasks deleted and message tracking reset successfully for all accounts in your keychain!');
       
       // Refresh Gmail data to update the message count
       await fetchGmailData();
+      // Refresh tasks to reflect the deletion
+      await fetchTasks();
     } catch (error: any) {
       setError(error.response?.data?.error || 'Failed to reset message tracking');
     } finally {
       setResettingTracking(false);
     }
   };
+
+
 
   const handleUpdateTaskStatus = async (taskId: string, newStatus: Task['status']) => {
     try {
@@ -190,7 +240,9 @@ const Dashboard: React.FC = () => {
     }
   };
 
-  const getGmailUrl = (messageId: string) => {
+  const getGmailUrl = (messageId: string, accountEmail?: string) => {
+    // For now, we'll use the default Gmail URL since we can't force a specific account
+    // Gmail will redirect to the appropriate account based on the user's session
     return `https://mail.google.com/mail/u/0/#inbox/${messageId}`;
   };
 
@@ -211,7 +263,7 @@ const Dashboard: React.FC = () => {
 
           {/* Gmail Inbox Status */}
           <div className="bg-white rounded-xl shadow-sm p-8">
-            <div className="flex items-center justify-between">
+            <div className="flex items-center justify-between mb-6">
               <div className="flex items-center space-x-4">
                 <div className="text-4xl">📧</div>
                 <div>
@@ -220,30 +272,41 @@ const Dashboard: React.FC = () => {
                     <p className="text-gray-600">Loading...</p>
                   ) : error ? (
                     <p className="text-red-600">{error}</p>
-                  ) : gmailData?.isConnected ? (
+                  ) : gmailData?.accounts && gmailData.accounts.length > 0 ? (
                     <div>
                       <p className="text-gray-600">
-                        Connected to <span className="font-medium text-gray-900">{gmailData.accountName}</span> ({gmailData.email})
+                        {gmailData.totals.activeAccounts} active account{gmailData.totals.activeAccounts !== 1 ? 's' : ''}
                       </p>
-                      <p className="text-3xl font-bold text-primary-600 mt-2">
-                        {gmailData.messagesTotal.toLocaleString()} unparsed messages
-                      </p>
+                      <div className="flex items-center space-x-6 mt-2">
+                        <div>
+                          <p className="text-sm text-gray-500">Total Messages</p>
+                          <p className="text-2xl font-bold text-gray-900">{gmailData.totals.totalMessages.toLocaleString()}</p>
+                        </div>
+                        <div>
+                          <p className="text-sm text-gray-500">Parsed</p>
+                          <p className="text-2xl font-bold text-green-600">{gmailData.totals.parsedMessages.toLocaleString()}</p>
+                        </div>
+                        <div>
+                          <p className="text-sm text-gray-500">Unparsed</p>
+                          <p className="text-2xl font-bold text-blue-600">{gmailData.totals.unparsedMessages.toLocaleString()}</p>
+                        </div>
+                      </div>
                     </div>
                   ) : (
                     <div>
-                      <p className="text-gray-600 mb-3">No Gmail account connected</p>
+                      <p className="text-gray-600 mb-3">No Gmail accounts connected</p>
                       <Link 
                         to="/integrations"
                         className="inline-block bg-primary-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-primary-700 transition-colors"
                       >
-                        Connect Gmail
+                        Manage Accounts
                       </Link>
                     </div>
                   )}
                 </div>
               </div>
               
-              {gmailData?.isConnected && (
+              {gmailData?.accounts && gmailData.accounts.length > 0 && (
                 <div className="text-right">
                   <div className="text-sm text-gray-500">Last updated</div>
                   <div className="text-sm font-medium text-gray-900">
@@ -268,6 +331,48 @@ const Dashboard: React.FC = () => {
                 </div>
               )}
             </div>
+
+            {/* Account Details */}
+            {gmailData?.accounts && gmailData.accounts.length > 0 && (
+              <div className="mt-6">
+                <h4 className="text-lg font-semibold text-gray-900 mb-4">Account Details</h4>
+                <div className="grid gap-4">
+                  {gmailData.accounts.map((account) => (
+                    <div key={account.integrationId} className="border border-gray-200 rounded-lg p-4">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center space-x-3">
+                          <div className={`w-3 h-3 rounded-full ${account.isActive ? 'bg-green-500' : 'bg-gray-400'}`}></div>
+                          <div>
+                            <h5 className="font-medium text-gray-900">{account.accountName}</h5>
+                            <p className="text-sm text-gray-600">{account.accountEmail}</p>
+                          </div>
+                        </div>
+                        <div className="text-right">
+                          {account.error ? (
+                            <div className="text-red-600 text-sm">{account.error}</div>
+                          ) : (
+                            <div className="flex items-center space-x-4 text-sm">
+                              <div>
+                                <span className="text-gray-500">Total:</span>
+                                <span className="font-medium ml-1">{account.counts.totalMessages.toLocaleString()}</span>
+                              </div>
+                              <div>
+                                <span className="text-gray-500">Parsed:</span>
+                                <span className="font-medium text-green-600 ml-1">{account.counts.parsedMessages.toLocaleString()}</span>
+                              </div>
+                              <div>
+                                <span className="text-gray-500">Unparsed:</span>
+                                <span className="font-medium text-blue-600 ml-1">{account.counts.unparsedMessages.toLocaleString()}</span>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Tasks Section */}
@@ -289,7 +394,7 @@ const Dashboard: React.FC = () => {
                 <div className="text-6xl mb-4">📝</div>
                 <h4 className="text-lg font-medium text-gray-900 mb-2">No tasks yet</h4>
                 <p className="text-gray-600">
-                  {gmailData?.isConnected 
+                  {gmailData?.accounts && gmailData.accounts.length > 0
                     ? 'Click "Parse for Tasks" above to extract tasks from your Gmail inbox'
                     : 'Connect your Gmail account to start extracting tasks'
                   }
@@ -315,9 +420,12 @@ const Dashboard: React.FC = () => {
                         )}
                         <div className="flex items-center space-x-4 text-sm text-gray-500">
                           <span>Source: {task.source}</span>
+                          {task.account_email && (
+                            <span className="text-blue-600 font-medium">📧 {task.account_email}</span>
+                          )}
                           {task.source === 'gmail' && task.source_id && (
                             <a 
-                              href={getGmailUrl(task.source_id)} 
+                              href={getGmailUrl(task.source_id, task.account_email)} 
                               target="_blank" 
                               rel="noopener noreferrer"
                               className="text-blue-600 hover:text-blue-800 underline"
