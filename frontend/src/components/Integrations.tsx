@@ -6,8 +6,10 @@ import axios from 'axios';
 interface Integration {
   id: string;
   provider: string;
-  email: string;
+  account_name: string;
+  account_email: string;
   is_active: boolean;
+  metadata?: any;
   created_at: string;
   updated_at: string;
 }
@@ -20,7 +22,8 @@ const Integrations: React.FC = () => {
   const [message, setMessage] = useState('');
   const [showAddForm, setShowAddForm] = useState(false);
   const [formData, setFormData] = useState({
-    email: '',
+    accountName: '',
+    accountEmail: '',
     accessToken: '',
     refreshToken: ''
   });
@@ -48,14 +51,15 @@ const Integrations: React.FC = () => {
     setError('');
     setMessage('');
 
-    if (!formData.email || !formData.accessToken) {
-      setError('Email and access token are required');
+    if (!formData.accountName || !formData.accountEmail || !formData.accessToken) {
+      setError('Account name, email, and access token are required');
       return;
     }
 
     try {
       const response = await axios.post('/api/integrations/gmail', {
-        email: formData.email,
+        accountName: formData.accountName,
+        accountEmail: formData.accountEmail,
         accessToken: formData.accessToken,
         refreshToken: formData.refreshToken || undefined
       }, {
@@ -63,7 +67,7 @@ const Integrations: React.FC = () => {
       });
 
       setMessage(response.data.message);
-      setFormData({ email: '', accessToken: '', refreshToken: '' });
+      setFormData({ accountName: '', accountEmail: '', accessToken: '', refreshToken: '' });
       setShowAddForm(false);
       fetchIntegrations();
     } catch (error: any) {
@@ -196,14 +200,29 @@ const Integrations: React.FC = () => {
               <h3 className="text-2xl font-bold text-gray-900 mb-6">Add Gmail Account</h3>
               <form onSubmit={handleAddGmail} className="space-y-6">
                 <div>
-                  <label htmlFor="email" className="block text-sm font-medium text-gray-700 mb-2">
+                  <label htmlFor="accountName" className="block text-sm font-medium text-gray-700 mb-2">
+                    Account Name
+                  </label>
+                  <input
+                    type="text"
+                    id="accountName"
+                    value={formData.accountName}
+                    onChange={(e) => setFormData({ ...formData, accountName: e.target.value })}
+                    placeholder="e.g., Work Gmail, Personal Gmail"
+                    required
+                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent transition-colors"
+                  />
+                </div>
+
+                <div>
+                  <label htmlFor="accountEmail" className="block text-sm font-medium text-gray-700 mb-2">
                     Gmail Address
                   </label>
                   <input
                     type="email"
-                    id="email"
-                    value={formData.email}
-                    onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+                    id="accountEmail"
+                    value={formData.accountEmail}
+                    onChange={(e) => setFormData({ ...formData, accountEmail: e.target.value })}
                     placeholder="your.email@gmail.com"
                     required
                     className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent transition-colors"
@@ -279,8 +298,8 @@ const Integrations: React.FC = () => {
                       <div className="flex items-center space-x-4">
                         <div className="text-2xl">{getProviderIcon(integration.provider)}</div>
                         <div>
-                          <h4 className="font-semibold text-gray-900">{getProviderName(integration.provider)}</h4>
-                          <p className="text-gray-600">{integration.email}</p>
+                          <h4 className="font-semibold text-gray-900">{integration.account_name}</h4>
+                          <p className="text-gray-600">{integration.account_email}</p>
                           <p className="text-sm text-gray-500">
                             Connected: {new Date(integration.created_at).toLocaleDateString()}
                           </p>

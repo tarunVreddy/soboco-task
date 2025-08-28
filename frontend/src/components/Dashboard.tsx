@@ -8,6 +8,7 @@ const Dashboard: React.FC = () => {
   const [gmailData, setGmailData] = useState<{
     messagesTotal: number;
     email: string;
+    accountName: string;
     isConnected: boolean;
   } | null>(null);
   const [loading, setLoading] = useState(true);
@@ -27,16 +28,18 @@ const Dashboard: React.FC = () => {
         setGmailData({
           messagesTotal: response.data.profile.messagesTotal,
           email: response.data.profile.emailAddress,
+          accountName: response.data.integration?.account_name || 'Gmail',
           isConnected: true
         });
       } catch (error: any) {
         if (error.response?.status === 400 && error.response?.data?.error?.includes('Gmail integration not found')) {
           // Gmail not connected - this is expected
-          setGmailData({
-            messagesTotal: 0,
-            email: '',
-            isConnected: false
-          });
+                  setGmailData({
+          messagesTotal: 0,
+          email: '',
+          accountName: '',
+          isConnected: false
+        });
         } else {
           console.error('Gmail API error:', error);
           setError('Failed to fetch Gmail data');
@@ -108,7 +111,7 @@ const Dashboard: React.FC = () => {
                   ) : gmailData?.isConnected ? (
                     <div>
                       <p className="text-gray-600">
-                        Connected to <span className="font-medium text-gray-900">{gmailData.email}</span>
+                        Connected to <span className="font-medium text-gray-900">{gmailData.accountName}</span> ({gmailData.email})
                       </p>
                       <p className="text-3xl font-bold text-primary-600 mt-2">
                         {gmailData.messagesTotal.toLocaleString()} messages
