@@ -12,12 +12,22 @@ export class GmailController {
   async getGmailProfile(req: Request, res: Response): Promise<void> {
     try {
       const user = (req as any).user;
+      const { integrationId } = req.query;
       
-      // Get user's Gmail integration
-      const integrations = await this.databaseService.findIntegrationsByUserId(user.id);
-      const gmailIntegration = integrations.find(integration => 
-        integration.provider === 'gmail'
-      );
+      let gmailIntegration;
+      
+      if (integrationId) {
+        // Get specific integration
+        gmailIntegration = await this.databaseService.findIntegrationById(integrationId as string);
+        if (!gmailIntegration || gmailIntegration.user_id !== user.id || gmailIntegration.provider !== 'google') {
+          res.status(404).json({ error: 'Gmail integration not found' });
+          return;
+        }
+      } else {
+        // Get first active Gmail integration
+        const integrations = await this.databaseService.findActiveIntegrationsByProvider(user.id, 'google');
+        gmailIntegration = integrations[0];
+      }
 
       if (!gmailIntegration || !gmailIntegration.access_token) {
         res.status(400).json({ error: 'Gmail integration not found or no access token' });
@@ -27,7 +37,14 @@ export class GmailController {
       const gmailService = new GmailService(gmailIntegration.access_token);
       const profile = await gmailService.getProfile();
 
-      res.status(200).json({ profile });
+      res.status(200).json({ 
+        profile,
+        integration: {
+          id: gmailIntegration.id,
+          account_name: gmailIntegration.account_name,
+          account_email: gmailIntegration.account_email
+        }
+      });
     } catch (error) {
       console.error('Get Gmail profile error:', error);
       res.status(500).json({ error: 'Failed to fetch Gmail profile' });

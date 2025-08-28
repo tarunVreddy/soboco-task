@@ -3,7 +3,6 @@ import { supabase } from '../../utils/supabase';
 export interface User {
   id: string;
   email: string;
-  password?: string;
   name?: string;
   google_id?: string;
   microsoft_id?: string;
@@ -36,12 +35,14 @@ export interface Task {
 
 export interface Integration {
   id: string;
+  user_id: string;
   provider: string;
-  email: string;
+  account_name: string;
+  account_email: string;
   access_token: string;
   refresh_token?: string;
   is_active: boolean;
-  user_id: string;
+  metadata?: any;
   created_at: string;
   updated_at: string;
 }
@@ -225,6 +226,7 @@ export class DatabaseService {
       .from('integrations')
       .insert({
         ...integrationData,
+        metadata: integrationData.metadata || {},
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
       })
@@ -239,9 +241,35 @@ export class DatabaseService {
     const { data, error } = await supabase
       .from('integrations')
       .select('*')
-      .eq('user_id', userId);
+      .eq('user_id', userId)
+      .order('created_at', { ascending: false });
 
     if (error) throw new Error(`Failed to find integrations: ${error.message}`);
+    return data || [];
+  }
+
+  async findIntegrationsByProvider(userId: string, provider: string): Promise<Integration[]> {
+    const { data, error } = await supabase
+      .from('integrations')
+      .select('*')
+      .eq('user_id', userId)
+      .eq('provider', provider)
+      .order('created_at', { ascending: false });
+
+    if (error) throw new Error(`Failed to find integrations: ${error.message}`);
+    return data || [];
+  }
+
+  async findActiveIntegrationsByProvider(userId: string, provider: string): Promise<Integration[]> {
+    const { data, error } = await supabase
+      .from('integrations')
+      .select('*')
+      .eq('user_id', userId)
+      .eq('provider', provider)
+      .eq('is_active', true)
+      .order('created_at', { ascending: false });
+
+    if (error) throw new Error(`Failed to find active integrations: ${error.message}`);
     return data || [];
   }
 

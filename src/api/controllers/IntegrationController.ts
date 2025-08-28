@@ -22,17 +22,17 @@ export class IntegrationController {
   async addGoogleEmail(req: Request, res: Response): Promise<void> {
     try {
       const user = (req as any).user;
-      const { email } = req.body;
+      const { accountName, accountEmail, accessToken, refreshToken } = req.body;
 
-      if (!email) {
-        res.status(400).json({ error: 'Email is required' });
+      if (!accountName || !accountEmail || !accessToken) {
+        res.status(400).json({ error: 'Account name, email, and access token are required' });
         return;
       }
 
-      // Check if integration already exists
-      const existingIntegrations = await this.databaseService.findIntegrationsByUserId(user.id);
+      // Check if this specific email is already connected for this user
+      const existingIntegrations = await this.databaseService.findIntegrationsByProvider(user.id, 'google');
       const existingGoogle = existingIntegrations.find(integration => 
-        integration.provider === 'gmail' && integration.email === email
+        integration.account_email === accountEmail
       );
 
       if (existingGoogle) {
@@ -40,15 +40,18 @@ export class IntegrationController {
         return;
       }
 
-      // For now, we'll create a placeholder integration
-      // The actual access token will be retrieved from Supabase auth session
       const integration = await this.databaseService.createIntegration({
         user_id: user.id,
-        provider: 'gmail',
-        email,
-        access_token: 'placeholder', // Will be updated when we get the actual token
-        refresh_token: undefined,
+        provider: 'google',
+        account_name: accountName,
+        account_email: accountEmail,
+        access_token: accessToken,
+        refresh_token: refreshToken,
         is_active: true,
+        metadata: {
+          connected_at: new Date().toISOString(),
+          provider_version: 'gmail-api-v1'
+        }
       });
 
       res.status(201).json({ 

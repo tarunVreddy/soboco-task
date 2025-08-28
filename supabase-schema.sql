@@ -8,7 +8,6 @@ CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 CREATE TABLE IF NOT EXISTS users (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     email VARCHAR(255) UNIQUE NOT NULL,
-    password VARCHAR(255),
     name VARCHAR(255),
     google_id VARCHAR(255) UNIQUE,
     microsoft_id VARCHAR(255) UNIQUE,
@@ -44,14 +43,19 @@ CREATE TABLE IF NOT EXISTS tasks (
 -- Integrations table
 CREATE TABLE IF NOT EXISTS integrations (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    provider VARCHAR(50) NOT NULL CHECK (provider IN ('slack', 'gmail', 'microsoft')),
-    email VARCHAR(255) NOT NULL,
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    provider VARCHAR(50) NOT NULL CHECK (provider IN ('google', 'microsoft', 'slack')),
+    account_name VARCHAR(255) NOT NULL, -- User-friendly name for the account
+    account_email VARCHAR(255) NOT NULL, -- Email associated with the integration
     access_token TEXT NOT NULL,
     refresh_token TEXT,
     is_active BOOLEAN DEFAULT true,
-    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    metadata JSONB DEFAULT '{}', -- Store provider-specific data
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    
+    -- Ensure unique combination of user, provider, and account email
+    UNIQUE(user_id, provider, account_email)
 );
 
 -- Messages table
@@ -81,6 +85,8 @@ CREATE INDEX IF NOT EXISTS idx_tasks_user_id ON tasks(user_id);
 CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);
 CREATE INDEX IF NOT EXISTS idx_integrations_user_id ON integrations(user_id);
 CREATE INDEX IF NOT EXISTS idx_integrations_provider ON integrations(provider);
+CREATE INDEX IF NOT EXISTS idx_integrations_account_email ON integrations(account_email);
+CREATE INDEX IF NOT EXISTS idx_integrations_active ON integrations(is_active);
 CREATE INDEX IF NOT EXISTS idx_messages_user_id ON messages(user_id);
 CREATE INDEX IF NOT EXISTS idx_messages_source ON messages(source);
 CREATE INDEX IF NOT EXISTS idx_messages_timestamp ON messages(timestamp);

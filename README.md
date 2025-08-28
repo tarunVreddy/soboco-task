@@ -98,14 +98,16 @@ cd ..
 
 ### 3. Database Setup
 
-#### For Supabase:
+#### For Supabase (Recommended):
+1. Install Supabase CLI: `brew install supabase/tap/supabase`
+2. Login to Supabase: `supabase login`
+3. Link your project: `supabase link --project-ref YOUR_PROJECT_REF`
+4. Push migrations: `supabase db push`
+
+#### Manual Setup (Alternative):
 1. Go to your Supabase dashboard > SQL Editor
 2. Copy and paste the contents of `supabase-schema.sql`
 3. Run the SQL to create all tables
-
-#### For Local PostgreSQL:
-1. Create the database: `createdb soboco_task`
-2. Run the SQL from `supabase-schema.sql` in your database
 
 ### 4. Start the Application
 
