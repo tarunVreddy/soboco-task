@@ -11,23 +11,49 @@ export class TaskService {
     this.ollamaProvider = new OllamaProvider();
   }
 
-  async parseGmailForTasks(userId: string, integrationId: string): Promise<{ extracted: number; created: number; processed: number }> {
+  async parseGmailForTasks(
+    userId: string, 
+    integrationId: string, 
+    progressCallback?: (progress: any) => void
+  ): Promise<{ extracted: number; created: number; processed: number }> {
     try {
+      console.log(`🔍 [DEBUG] Starting parseGmailForTasks for user ${userId}, integration ${integrationId}`);
+      
       // Get the Gmail integration
       const integration = await this.databaseService.findIntegrationById(integrationId);
       if (!integration || integration.user_id !== userId || integration.provider !== 'google') {
+        console.error(`❌ [DEBUG] Integration not found or invalid:`, { integrationId, userId, integration });
         throw new Error('Gmail integration not found');
       }
+      
+      console.log(`✅ [DEBUG] Found integration:`, { 
+        id: integration.id, 
+        account_email: integration.account_email, 
+        is_active: integration.is_active 
+      });
 
       // Check if Ollama is available
+      console.log(`🔍 [DEBUG] Checking Ollama availability...`);
       const isOllamaAvailable = await this.ollamaProvider.isAvailable();
       if (!isOllamaAvailable) {
+        console.error(`❌ [DEBUG] Ollama is not available`);
         throw new Error('Ollama AI service is not available');
       }
+      console.log(`✅ [DEBUG] Ollama is available`);
 
       // Get recent Gmail messages
+      console.log(`🔍 [DEBUG] Creating Gmail service and fetching messages...`);
       const gmailService = new GmailService(integration.access_token);
-      const messages = await gmailService.getMessages(50, 'in:inbox'); // Get last 50 inbox messages
+      const messages = await gmailService.getMessages(50, 'label:INBOX -label:archive -label:trash -label:spam'); // Get last 50 inbox messages (excluding archived, trash, spam)
+      console.log(`✅ [DEBUG] Fetched ${messages.length} messages from Gmail`);
+      
+      // Debug: Log labels for first few messages to see what we're getting
+      if (messages.length > 0) {
+        console.log(`🔍 [DEBUG] Sample message labels:`);
+        messages.slice(0, 3).forEach((msg, index) => {
+          console.log(`  Message ${index + 1}: ${msg.labelIds?.join(', ') || 'No labels'}`);
+        });
+      }
 
       let extractedCount = 0;
       let createdCount = 0;
@@ -51,39 +77,55 @@ export class TaskService {
 
       console.log(`🔍 [DEBUG] Processing ${unparsedMessages.length} unparsed messages`);
 
-      // Prepare batch messages for AI processing
-      const batchMessages: BatchMessage[] = unparsedMessages.map(message => {
-        const content = gmailService.extractEmailContent(message);
-        const subject = gmailService.getSubject(message);
-        const sender = gmailService.getSenderEmail(message);
+      // Process messages one by one with progress tracking
+      console.log(`🔍 [DEBUG] Processing ${unparsedMessages.length} messages individually`);
+      
+      if (progressCallback) {
+        progressCallback({ 
+          type: 'progress', 
+          message: `Processing ${unparsedMessages.length} messages...`,
+          current: 0,
+          total: unparsedMessages.length
+        });
+      }
+      
+      for (let i = 0; i < unparsedMessages.length; i++) {
+        const message = unparsedMessages[i];
+        console.log(`🔍 [DEBUG] Processing message ${i + 1}/${unparsedMessages.length}: ${message.id}`);
         
-        // Combine subject and content for AI analysis
-        const fullContent = `Subject: ${subject}\nFrom: ${sender}\n\n${content}`;
+        if (progressCallback) {
+          progressCallback({ 
+            type: 'message', 
+            message: `Processing message ${i + 1}/${unparsedMessages.length}`,
+            current: i + 1,
+            total: unparsedMessages.length,
+            messageId: message.id
+          });
+        }
         
-        return {
-          id: message.id,
-          content: fullContent,
-          subject,
-          sender
-        };
-      });
-
-      // Process messages in batch using AI
-      console.log(`🔍 [DEBUG] Starting batch processing of ${batchMessages.length} messages`);
-      const batchResults = await this.ollamaProvider.extractTasksBatch(batchMessages);
-      console.log(`🔍 [DEBUG] Batch processing completed. Got results for ${batchResults.length} messages`);
-
-      // Process results and create tasks
-      for (const batchResult of batchResults) {
         try {
-          const { messageId, result } = batchResult;
-          const message = unparsedMessages.find(m => m.id === messageId);
+          // Extract email content
+          const content = gmailService.extractEmailContent(message);
+          const subject = gmailService.getSubject(message);
+          const sender = gmailService.getSenderEmail(message);
           
-          if (!message) {
-            console.warn(`Message ${messageId} not found in original messages`);
-            continue;
+          // Combine subject and content for AI analysis
+          const fullContent = `Subject: ${subject}\nFrom: ${sender}\n\n${content}`;
+          
+          // Process single message with AI
+          const result = await this.ollamaProvider.extractTasks(fullContent);
+          console.log(`🔍 [DEBUG] Message ${i + 1}/${unparsedMessages.length} - Extracted ${result.tasks.length} tasks`);
+          
+          if (progressCallback) {
+            progressCallback({ 
+              type: 'extracted', 
+              message: `Extracted ${result.tasks.length} tasks from message ${i + 1}`,
+              current: i + 1,
+              total: unparsedMessages.length,
+              extracted: result.tasks.length
+            });
           }
-
+          
           extractedCount += result.tasks.length;
           processedCount++;
 
@@ -108,6 +150,11 @@ export class TaskService {
               }
             }
 
+            // Extract email metadata
+            const senderEmail = gmailService.getSenderEmail(message);
+            const emailReceivedAt = new Date(parseInt(message.internalDate)).toISOString();
+            const recipients = gmailService.getRecipients(message);
+
             const taskData: Omit<Task, 'id' | 'created_at' | 'updated_at'> = {
               user_id: userId,
               integration_id: integration.id,
@@ -120,10 +167,26 @@ export class TaskService {
               due_date: dueDate,
               source: 'gmail',
               source_id: message.id,
+              email_received_at: emailReceivedAt,
+              email_sender: senderEmail,
+              email_recipients: recipients,
             };
 
             await this.databaseService.createTask(taskData);
             createdCount++;
+            console.log(`✅ [DEBUG] Created task: "${aiTask.title}" (Priority: ${aiTask.priority})`);
+            
+            if (progressCallback) {
+              progressCallback({ 
+                type: 'task_created', 
+                message: `Created task: "${aiTask.title}"`,
+                current: i + 1,
+                total: unparsedMessages.length,
+                taskTitle: aiTask.title,
+                taskPriority: aiTask.priority,
+                createdCount: createdCount
+              });
+            }
           }
 
           // Mark message as parsed
@@ -135,8 +198,8 @@ export class TaskService {
           });
 
         } catch (error) {
-          console.error(`Error processing batch result for message ${batchResult.messageId}:`, error);
-          // Continue with next result
+          console.error(`❌ [DEBUG] Error processing message ${i + 1}/${unparsedMessages.length} (${message.id}):`, error);
+          // Continue with next message
         }
       }
 
@@ -183,7 +246,7 @@ export class TaskService {
 
       // Get recent Gmail messages
       const gmailService = new GmailService(integration.access_token);
-      const messages = await gmailService.getMessages(500, 'in:inbox'); // Get last 500 inbox messages
+      const messages = await gmailService.getMessages(500, 'label:INBOX -label:archive -label:trash -label:spam'); // Get last 500 inbox messages (excluding archived, trash, spam)
 
       // Get list of already parsed messages
       const parsedMessages = await this.databaseService.findParsedMessagesByIntegration(userId, integrationId);
@@ -201,5 +264,14 @@ export class TaskService {
       console.error('Error getting unparsed message count:', error);
       throw error;
     }
+  }
+
+  // Debug methods
+  async getIntegrationsForUser(userId: string) {
+    return await this.databaseService.findIntegrationsByUserId(userId);
+  }
+
+  async isOllamaAvailable(): Promise<boolean> {
+    return await this.ollamaProvider.isAvailable();
   }
 }

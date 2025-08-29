@@ -22,7 +22,7 @@ export const config = {
   ai: {
     ollama: {
       baseUrl: process.env.OLLAMA_BASE_URL || 'http://localhost:11434',
-      model: process.env.OLLAMA_MODEL || 'llama2',
+      model: process.env.OLLAMA_MODEL || 'phi4:latest',
       maxTokens: parseInt(process.env.OLLAMA_MAX_TOKENS || '4000', 10),
       batchSize: parseInt(process.env.OLLAMA_BATCH_SIZE || '10', 10),
     },

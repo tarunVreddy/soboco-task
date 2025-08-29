@@ -32,6 +32,9 @@ export interface Task {
   integration_id?: string;
   account_email?: string;
   account_name?: string;
+  email_received_at?: string;
+  email_sender?: string;
+  email_recipients?: string;
   created_at: string;
   updated_at: string;
 }
@@ -371,9 +374,11 @@ export class DatabaseService {
   async createParsedMessage(parsedMessageData: Omit<ParsedMessage, 'id' | 'parsed_at'>): Promise<ParsedMessage> {
     const { data, error } = await supabase
       .from('parsed_messages')
-      .insert({
+      .upsert({
         ...parsedMessageData,
         parsed_at: new Date().toISOString(),
+      }, {
+        onConflict: 'user_id,integration_id,gmail_message_id'
       })
       .select()
       .single();

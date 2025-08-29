@@ -134,8 +134,10 @@ export class GmailService {
       console.log('🔍 [DEBUG] Getting inbox message count...');
       
       // Get all inbox messages (up to a reasonable limit)
+      // Use a more specific query to exclude archived emails and other non-inbox labels
+      // Alternative approach: explicitly look for INBOX label and exclude unwanted labels
       const response = await axios.get(
-        'https://gmail.googleapis.com/gmail/v1/users/me/messages?q=in:inbox&maxResults=500',
+        'https://gmail.googleapis.com/gmail/v1/users/me/messages?q=label:INBOX -label:archive -label:trash -label:spam&maxResults=500',
         { headers: this.getHeaders() }
       );
       
@@ -259,6 +261,18 @@ export class GmailService {
   getSubject(message: GmailMessage): string {
     const headers = this.extractEmailHeaders(message);
     return headers['subject'] || '';
+  }
+
+  // Helper method to get recipients (to + cc)
+  getRecipients(message: GmailMessage): string {
+    const headers = this.extractEmailHeaders(message);
+    const to = headers['to'] || '';
+    const cc = headers['cc'] || '';
+    
+    if (to && cc) {
+      return `${to}, ${cc}`;
+    }
+    return to || cc;
   }
 
   // Helper method to get date

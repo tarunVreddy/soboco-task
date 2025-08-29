@@ -353,4 +353,76 @@ export class GmailController {
       res.status(500).json({ error: 'Failed to fetch recent Gmail messages' });
     }
   }
+
+  async getEmailContent(req: Request, res: Response): Promise<void> {
+    try {
+      const user = (req as any).user;
+      const { messageId } = req.params;
+      const { integrationId } = req.query;
+
+      if (!messageId) {
+        res.status(400).json({ error: 'Message ID is required' });
+        return;
+      }
+
+      let gmailIntegration;
+      
+      if (integrationId) {
+        // Get specific integration
+        gmailIntegration = await this.databaseService.findIntegrationById(integrationId as string);
+        if (!gmailIntegration || gmailIntegration.user_id !== user.id || gmailIntegration.provider !== 'google') {
+          res.status(404).json({ error: 'Gmail integration not found' });
+          return;
+        }
+      } else {
+        // Get first active Gmail integration
+        const integrations = await this.databaseService.findActiveIntegrationsByProvider(user.id, 'google');
+        gmailIntegration = integrations[0];
+      }
+
+      if (!gmailIntegration || !gmailIntegration.access_token) {
+        res.status(400).json({ error: 'Gmail integration not found or no access token' });
+        return;
+      }
+
+      // Create token refresh callback for this integration
+      const tokenRefreshCallback = async (result: any) => {
+        try {
+          console.log(`🔄 Updating integration ${gmailIntegration.id} with new tokens`);
+          await this.databaseService.updateIntegration(gmailIntegration.id, {
+            access_token: result.accessToken,
+            refresh_token: result.refreshToken || gmailIntegration.refresh_token,
+          });
+          console.log(`✅ Integration ${gmailIntegration.id} updated with new tokens`);
+        } catch (error) {
+          console.error(`❌ Failed to update integration ${gmailIntegration.id} with new tokens:`, error);
+        }
+      };
+
+      const gmailService = new GmailService(
+        gmailIntegration.access_token,
+        gmailIntegration.refresh_token,
+        tokenRefreshCallback
+      );
+
+      const message = await gmailService.getMessage(messageId);
+      
+      const emailContent = {
+        id: message.id,
+        threadId: message.threadId,
+        subject: gmailService.getSubject(message),
+        sender: gmailService.getSenderEmail(message),
+        recipients: gmailService.getRecipients(message),
+        snippet: message.snippet,
+        date: gmailService.getDate(message),
+        content: gmailService.extractEmailContent(message),
+        headers: gmailService.extractEmailHeaders(message)
+      };
+
+      res.status(200).json(emailContent);
+    } catch (error) {
+      console.error('Get email content error:', error);
+      res.status(500).json({ error: 'Failed to fetch email content' });
+    }
+  }
 }

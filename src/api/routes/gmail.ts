@@ -26,4 +26,7 @@ router.get('/unread', (req, res) => gmailController.getUnreadMessages(req, res))
 // Get recent messages
 router.get('/recent', (req, res) => gmailController.getRecentMessages(req, res));
 
+// Get email content by message ID
+router.get('/message/:messageId', (req, res) => gmailController.getEmailContent(req, res));
+
 export default router;

@@ -222,24 +222,22 @@ EXTRACT: direct requests, deadlines, action items, follow-ups.
 
 Messages: ${JSON.stringify(messagesJson, null, 2)}
 
-Respond with JSON only:
-{
-  "results": [
-    {
-      "messageId": "message_id_1",
-      "tasks": [
-        {
-          "title": "Task title",
-          "description": "Description (optional)",
-          "priority": "LOW|MEDIUM|HIGH|URGENT",
-          "dueDate": "YYYY-MM-DD" (only if specific date mentioned)
-        }
-      ],
-      "confidence": 0.85,
-      "reasoning": "Why tasks were extracted or why none found"
-    }
-  ]
-}
+Respond with a JSON array only (no markdown formatting):
+[
+  {
+    "messageId": "message_id_1",
+    "tasks": [
+      {
+        "title": "Task title",
+        "description": "Description (optional)",
+        "priority": "LOW",
+        "dueDate": "YYYY-MM-DD" (only if specific date mentioned)
+      }
+    ],
+    "confidence": 0.85,
+    "reasoning": "Why tasks were extracted or why none found"
+  }
+]
 
 If no tasks found in a message:
 {
@@ -247,7 +245,9 @@ If no tasks found in a message:
   "tasks": [],
   "confidence": 0.0,
   "reasoning": "No actionable tasks - informational content"
-}`;
+}
+
+IMPORTANT: Return ONLY valid JSON. Do not include any markdown formatting, code blocks, or explanatory text.`;
   }
 
   private parseResponse(response: string): AIExtractionResult {
@@ -270,7 +270,6 @@ If no tasks found in a message:
         .replace(/\/\*[\s\S]*?\*\//g, '') // Remove multi-line comments
         .replace(/,\s*}/g, '}') // Remove trailing commas
         .replace(/,\s*]/g, ']') // Remove trailing commas in arrays
-        .replace(/([^\\])"/g, '$1"') // Fix unescaped quotes
         .replace(/\n/g, ' ') // Remove newlines
         .replace(/\r/g, ' ') // Remove carriage returns
         .replace(/\t/g, ' ') // Remove tabs
@@ -283,12 +282,21 @@ If no tasks found in a message:
       console.log('🔍 [DEBUG] Parsed JSON object:', JSON.stringify(parsed, null, 2));
       
       // Validate and transform the response
-      const tasks: Task[] = (parsed.tasks || []).map((task: any) => ({
-        title: task.title || 'Untitled Task',
-        description: task.description,
-        priority: task.priority || 'MEDIUM',
-        dueDate: task.dueDate ? new Date(task.dueDate) : undefined,
-      }));
+      const tasks: Task[] = (parsed.tasks || []).map((task: any) => {
+        // Fix priority parsing - handle cases where AI returns multiple options
+        let priority = task.priority || 'MEDIUM';
+        if (typeof priority === 'string' && priority.includes('|')) {
+          // If AI returns multiple options like "LOW|MEDIUM|HIGH|URGENT", take the first one
+          priority = priority.split('|')[0];
+        }
+        
+        return {
+          title: task.title || 'Untitled Task',
+          description: task.description,
+          priority: priority,
+          dueDate: task.dueDate ? new Date(task.dueDate) : undefined,
+        };
+      });
 
       const result = {
         tasks,
@@ -313,8 +321,13 @@ If no tasks found in a message:
     try {
       console.log('🔍 [DEBUG] Raw Ollama batch response:', response);
       
-      // Clean the response to extract JSON
-      const jsonMatch = response.match(/\{[\s\S]*\}/);
+      // Clean the response to extract JSON - handle both object and array responses
+      let jsonMatch = response.match(/\{[\s\S]*\}/);
+      if (!jsonMatch) {
+        // Try to match array format
+        jsonMatch = response.match(/\[[\s\S]*\]/);
+      }
+      
       if (!jsonMatch) {
         console.error('❌ [DEBUG] No JSON found in batch response');
         throw new Error('No JSON found in batch response');
@@ -329,7 +342,6 @@ If no tasks found in a message:
         .replace(/\/\*[\s\S]*?\*\//g, '') // Remove multi-line comments
         .replace(/,\s*}/g, '}') // Remove trailing commas
         .replace(/,\s*]/g, ']') // Remove trailing commas in arrays
-        .replace(/([^\\])"/g, '$1"') // Fix unescaped quotes
         .replace(/\n/g, ' ') // Remove newlines
         .replace(/\r/g, ' ') // Remove carriage returns
         .replace(/\t/g, ' ') // Remove tabs
@@ -342,16 +354,32 @@ If no tasks found in a message:
       console.log('🔍 [DEBUG] Parsed batch JSON object:', JSON.stringify(parsed, null, 2));
       
       const results: BatchExtractionResult[] = [];
-      const batchResults = parsed.results || [];
+      
+      // Handle both object format (with results array) and direct array format
+      let batchResults;
+      if (Array.isArray(parsed)) {
+        batchResults = parsed;
+      } else {
+        batchResults = parsed.results || [];
+      }
 
       // Process each result in the batch
       for (const batchResult of batchResults) {
-        const tasks: Task[] = (batchResult.tasks || []).map((task: any) => ({
-          title: task.title || 'Untitled Task',
-          description: task.description,
-          priority: task.priority || 'MEDIUM',
-          dueDate: task.dueDate ? new Date(task.dueDate) : undefined,
-        }));
+        const tasks: Task[] = (batchResult.tasks || []).map((task: any) => {
+          // Fix priority parsing - handle cases where AI returns multiple options
+          let priority = task.priority || 'MEDIUM';
+          if (typeof priority === 'string' && priority.includes('|')) {
+            // If AI returns multiple options like "LOW|MEDIUM|HIGH|URGENT", take the first one
+            priority = priority.split('|')[0];
+          }
+          
+          return {
+            title: task.title || 'Untitled Task',
+            description: task.description,
+            priority: priority,
+            dueDate: task.dueDate ? new Date(task.dueDate) : undefined,
+          };
+        });
 
         results.push({
           messageId: batchResult.messageId,
