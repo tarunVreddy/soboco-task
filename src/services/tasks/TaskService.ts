@@ -1,6 +1,6 @@
 import { DatabaseService, Task } from '../database/DatabaseService';
+import { OllamaProvider } from '../../ai/providers/ollama';
 import { GmailService } from '../gmail/GmailService';
-import { OllamaProvider, BatchMessage } from '../../ai/providers/ollama';
 
 export class TaskService {
   private databaseService: DatabaseService;
@@ -17,20 +17,21 @@ export class TaskService {
     progressCallback?: (progress: any) => void
   ): Promise<{ extracted: number; created: number; processed: number }> {
     try {
-      console.log(`🔍 [DEBUG] Starting parseGmailForTasks for user ${userId}, integration ${integrationId}`);
-      
-      // Get the Gmail integration
+      // Get integration details
       const integration = await this.databaseService.findIntegrationById(integrationId);
-      if (!integration || integration.user_id !== userId || integration.provider !== 'google') {
-        console.error(`❌ [DEBUG] Integration not found or invalid:`, { integrationId, userId, integration });
-        throw new Error('Gmail integration not found');
+      if (!integration) {
+        throw new Error('Integration not found');
       }
-      
-      console.log(`✅ [DEBUG] Found integration:`, { 
-        id: integration.id, 
-        account_email: integration.account_email, 
-        is_active: integration.is_active 
-      });
+
+      if (integration.user_id !== userId) {
+        throw new Error('Integration does not belong to user');
+      }
+
+      if (!integration.is_active) {
+        throw new Error('Integration is not active');
+      }
+
+      console.log(`🔍 [DEBUG] Starting task extraction for user ${userId}, integration ${integrationId}`);
 
       // Check if Ollama is available
       console.log(`🔍 [DEBUG] Checking Ollama availability...`);
@@ -77,197 +78,247 @@ export class TaskService {
 
       console.log(`🔍 [DEBUG] Processing ${unparsedMessages.length} unparsed messages`);
 
-      // Process messages one by one with progress tracking
-      console.log(`🔍 [DEBUG] Processing ${unparsedMessages.length} messages individually`);
+      // Process messages in batches for efficiency
+      const BATCH_SIZE = 5; // Process 5 messages at a time
+      const batches = [];
+      for (let i = 0; i < unparsedMessages.length; i += BATCH_SIZE) {
+        batches.push(unparsedMessages.slice(i, i + BATCH_SIZE));
+      }
+      
+      console.log(`🔍 [DEBUG] Processing ${unparsedMessages.length} messages in ${batches.length} batches of ${BATCH_SIZE}`);
       
       if (progressCallback) {
         progressCallback({ 
           type: 'progress', 
-          message: `Processing ${unparsedMessages.length} messages...`,
+          message: `Processing ${unparsedMessages.length} messages in ${batches.length} batches...`,
           current: 0,
           total: unparsedMessages.length
         });
       }
       
-      for (let i = 0; i < unparsedMessages.length; i++) {
-        const message = unparsedMessages[i];
-        console.log(`🔍 [DEBUG] Processing message ${i + 1}/${unparsedMessages.length}: ${message.id}`);
+      let currentMessageIndex = 0;
+      
+      for (let batchIndex = 0; batchIndex < batches.length; batchIndex++) {
+        const batch = batches[batchIndex];
+        console.log(`🔍 [DEBUG] Processing batch ${batchIndex + 1}/${batches.length} with ${batch.length} messages`);
         
         if (progressCallback) {
           progressCallback({ 
-            type: 'message', 
-            message: `Processing message ${i + 1}/${unparsedMessages.length}`,
-            current: i + 1,
+            type: 'batch', 
+            message: `Processing batch ${batchIndex + 1}/${batches.length} (${batch.length} messages)`,
+            current: currentMessageIndex,
             total: unparsedMessages.length,
-            messageId: message.id
+            batchIndex: batchIndex + 1,
+            totalBatches: batches.length
           });
         }
         
         try {
-          // Extract email content
-          const content = gmailService.extractEmailContent(message);
-          const subject = gmailService.getSubject(message);
-          const sender = gmailService.getSenderEmail(message);
+          // Prepare batch content for AI processing
+          const batchContent = [];
+          const batchMetadata = [];
           
-          // Combine subject and content for AI analysis
-          const fullContent = `Subject: ${subject}\nFrom: ${sender}\n\n${content}`;
-          
-          // Process single message with AI
-          const result = await this.ollamaProvider.extractTasks(fullContent);
-          console.log(`🔍 [DEBUG] Message ${i + 1}/${unparsedMessages.length} - Extracted ${result.tasks.length} tasks`);
-          
-          if (progressCallback) {
-            progressCallback({ 
-              type: 'extracted', 
-              message: `Extracted ${result.tasks.length} tasks from message ${i + 1}`,
-              current: i + 1,
-              total: unparsedMessages.length,
-              extracted: result.tasks.length
+          for (const message of batch) {
+            const content = gmailService.extractEmailContent(message);
+            const subject = gmailService.getSubject(message);
+            const sender = gmailService.getSenderEmail(message);
+            
+            batchContent.push(`--- Message ${batchContent.length + 1} ---\nSubject: ${subject}\nFrom: ${sender}\n\n${content}`);
+            batchMetadata.push({
+              messageId: message.id,
+              senderEmail: sender,
+              emailReceivedAt: new Date(parseInt(message.internalDate)).toISOString(),
+              recipients: gmailService.getRecipients(message)
             });
           }
           
-          extractedCount += result.tasks.length;
-          processedCount++;
-
-          // Create tasks in database
-          for (const aiTask of result.tasks) {
-            // Validate and parse due date
-            let dueDate: string | undefined = undefined;
-            if (aiTask.dueDate) {
-              try {
-                // Check if it's a valid date string (not a placeholder)
-                if (aiTask.dueDate instanceof Date && !isNaN(aiTask.dueDate.getTime())) {
-                  dueDate = aiTask.dueDate.toISOString();
-                } else if (typeof aiTask.dueDate === 'string' && aiTask.dueDate !== 'YYYY-MM-DD') {
-                  // Try to parse the date string
-                  const parsedDate = new Date(aiTask.dueDate);
-                  if (!isNaN(parsedDate.getTime())) {
-                    dueDate = parsedDate.toISOString();
-                  }
-                }
-              } catch (error) {
-                console.warn(`Invalid due date for task "${aiTask.title}": ${aiTask.dueDate}`);
-              }
-            }
-
-            // Extract email metadata
-            const senderEmail = gmailService.getSenderEmail(message);
-            const emailReceivedAt = new Date(parseInt(message.internalDate)).toISOString();
-            const recipients = gmailService.getRecipients(message);
-
-            const taskData: Omit<Task, 'id' | 'created_at' | 'updated_at'> = {
-              user_id: userId,
-              integration_id: integration.id,
-              account_email: integration.account_email,
-              account_name: integration.account_name,
-              title: aiTask.title,
-              description: aiTask.description,
-              priority: aiTask.priority || 'MEDIUM',
-              status: 'PENDING',
-              due_date: dueDate,
-              source: 'gmail',
-              source_id: message.id,
-              email_received_at: emailReceivedAt,
-              email_sender: senderEmail,
-              email_recipients: recipients,
-            };
-
-            await this.databaseService.createTask(taskData);
-            createdCount++;
-            console.log(`✅ [DEBUG] Created task: "${aiTask.title}" (Priority: ${aiTask.priority})`);
+          const fullBatchContent = batchContent.join('\n\n');
+          
+          // Process batch with AI
+          console.log(`🔍 [DEBUG] Processing batch ${batchIndex + 1} with Ollama...`);
+          const batchResult = await this.ollamaProvider.extractTasks(fullBatchContent);
+          
+          console.log(`🔍 [DEBUG] Batch ${batchIndex + 1} - Extracted ${batchResult.tasks.length} total tasks`);
+          
+          // Distribute tasks across messages in the batch
+          const tasksPerMessage = Math.ceil(batchResult.tasks.length / batch.length);
+          let taskIndex = 0;
+          
+          for (let messageIndex = 0; messageIndex < batch.length; messageIndex++) {
+            const message = batch[messageIndex];
+            const messageMetadata = batchMetadata[messageIndex];
+            currentMessageIndex++;
+            
+            // Assign tasks to this message (distribute evenly)
+            const messageTasks = batchResult.tasks.slice(taskIndex, taskIndex + tasksPerMessage);
+            taskIndex += tasksPerMessage;
+            
+            console.log(`🔍 [DEBUG] Message ${currentMessageIndex}/${unparsedMessages.length} (${message.id}) - Assigned ${messageTasks.length} tasks`);
             
             if (progressCallback) {
               progressCallback({ 
-                type: 'task_created', 
-                message: `Created task: "${aiTask.title}"`,
-                current: i + 1,
+                type: 'message', 
+                message: `Processed message ${currentMessageIndex}/${unparsedMessages.length}`,
+                current: currentMessageIndex,
                 total: unparsedMessages.length,
-                taskTitle: aiTask.title,
-                taskPriority: aiTask.priority,
-                createdCount: createdCount
+                messageId: message.id,
+                extracted: messageTasks.length
               });
             }
+            
+            extractedCount += messageTasks.length;
+            processedCount++;
+
+            // Create tasks in database for this message
+            for (const aiTask of messageTasks) {
+              // Validate and parse due date
+              let dueDate: string | undefined = undefined;
+              if (aiTask.dueDate) {
+                try {
+                  if (aiTask.dueDate instanceof Date && !isNaN(aiTask.dueDate.getTime())) {
+                    dueDate = aiTask.dueDate.toISOString();
+                  } else if (typeof aiTask.dueDate === 'string' && aiTask.dueDate !== 'YYYY-MM-DD') {
+                    const parsedDate = new Date(aiTask.dueDate);
+                    if (!isNaN(parsedDate.getTime())) {
+                      dueDate = parsedDate.toISOString();
+                    }
+                  }
+                } catch (error) {
+                  console.warn(`Invalid due date for task "${aiTask.title}": ${aiTask.dueDate}`);
+                }
+              }
+
+              const taskData: Omit<Task, 'id' | 'created_at' | 'updated_at'> = {
+                user_id: userId,
+                integration_id: integrationId,
+                title: aiTask.title,
+                description: aiTask.description,
+                status: 'PENDING',
+                priority: aiTask.priority || 'MEDIUM',
+                due_date: dueDate,
+                source: 'gmail',
+                source_id: message.id,
+                message_id: message.id,
+                account_email: integration.account_email,
+                account_name: integration.account_name,
+                email_received_at: messageMetadata.emailReceivedAt,
+                email_sender: messageMetadata.senderEmail,
+                email_recipients: messageMetadata.recipients,
+              };
+
+              const createdTask = await this.databaseService.createTask(taskData);
+              createdCount++;
+              console.log(`✅ [DEBUG] Created task: "${createdTask.title}" (Priority: ${createdTask.priority})`);
+            }
+
+            // Mark message as parsed
+            await this.databaseService.createParsedMessage({
+              user_id: userId,
+              integration_id: integrationId,
+              gmail_message_id: message.id,
+              tasks_extracted: messageTasks.length
+            });
           }
 
-          // Mark message as parsed
-          await this.databaseService.createParsedMessage({
-            user_id: userId,
-            integration_id: integrationId,
-            gmail_message_id: message.id,
-            tasks_extracted: result.tasks.length,
-          });
-
         } catch (error) {
-          console.error(`❌ [DEBUG] Error processing message ${i + 1}/${unparsedMessages.length} (${message.id}):`, error);
-          // Continue with next message
+          console.error(`❌ [DEBUG] Error processing batch ${batchIndex + 1}:`, error);
+          // Mark all messages in this batch as parsed with 0 tasks to avoid reprocessing
+          for (const message of batch) {
+            try {
+              await this.databaseService.createParsedMessage({
+                user_id: userId,
+                integration_id: integrationId,
+                gmail_message_id: message.id,
+                tasks_extracted: 0
+              });
+              currentMessageIndex++;
+              processedCount++;
+            } catch (parseError) {
+              console.error(`❌ [DEBUG] Error marking message ${message.id} as parsed:`, parseError);
+            }
+          }
         }
       }
 
-      console.log(`🔍 [DEBUG] Task extraction completed: ${extractedCount} tasks extracted, ${createdCount} tasks created, ${processedCount} messages processed`);
+      console.log(`✅ [DEBUG] Task extraction completed: ${extractedCount} tasks extracted, ${createdCount} tasks created, ${processedCount} messages processed`);
+      
       return { extracted: extractedCount, created: createdCount, processed: processedCount };
+
     } catch (error) {
-      console.error('Error parsing Gmail for tasks:', error);
+      console.error('❌ [DEBUG] Task extraction failed:', error);
       throw error;
     }
-  }
-
-  async getUserTasks(userId: string): Promise<Task[]> {
-    return await this.databaseService.findTasksByUserId(userId);
-  }
-
-  async updateTaskStatus(taskId: string, status: Task['status']): Promise<Task> {
-    return await this.databaseService.updateTask(taskId, { status });
-  }
-
-  async deleteTask(taskId: string): Promise<void> {
-    await this.databaseService.deleteTask(taskId);
-  }
-
-  async resetMessageTracking(userId: string, integrationId: string): Promise<void> {
-    // Delete all tasks for this user (across all accounts)
-    await this.databaseService.deleteAllTasksByUserId(userId);
-    
-    // Clear parsed messages tracking for ALL integrations for this user
-    const integrations = await this.databaseService.findIntegrationsByUserId(userId);
-    for (const integration of integrations) {
-      await this.databaseService.clearParsedMessages(userId, integration.id);
-    }
-    
-    console.log(`🔍 [DEBUG] Reset completed for user ${userId}: deleted all tasks and cleared parsed messages for all ${integrations.length} integrations`);
   }
 
   async getUnparsedMessageCount(userId: string, integrationId: string): Promise<number> {
     try {
-      // Get the Gmail integration
+      const gmailService = new GmailService('');
       const integration = await this.databaseService.findIntegrationById(integrationId);
-      if (!integration || integration.user_id !== userId || integration.provider !== 'google') {
-        throw new Error('Gmail integration not found');
+      
+      if (!integration || integration.user_id !== userId) {
+        return 0;
       }
 
-      // Get recent Gmail messages
-      const gmailService = new GmailService(integration.access_token);
-      const messages = await gmailService.getMessages(500, 'label:INBOX -label:archive -label:trash -label:spam'); // Get last 500 inbox messages (excluding archived, trash, spam)
-
-      // Get list of already parsed messages
-      const parsedMessages = await this.databaseService.findParsedMessagesByIntegration(userId, integrationId);
-      const parsedMessageIds = new Set(parsedMessages.map(pm => pm.gmail_message_id));
-
-      // Count unparsed messages
-      const unparsedCount = messages.filter(message => !parsedMessageIds.has(message.id)).length;
-
-      console.log('🔍 [DEBUG] Total inbox messages:', messages.length);
-      console.log('🔍 [DEBUG] Already parsed messages:', parsedMessages.length);
-      console.log('🔍 [DEBUG] Unparsed messages:', unparsedCount);
-
+      const gmail = new GmailService(integration.access_token);
+      const messages = await gmail.getMessages(50, 'label:INBOX -label:archive -label:trash -label:spam');
+      
+      let unparsedCount = 0;
+      for (const message of messages) {
+        const isAlreadyParsed = await this.databaseService.isMessageParsed(userId, integrationId, message.id);
+        if (!isAlreadyParsed) {
+          unparsedCount++;
+        }
+      }
+      
       return unparsedCount;
     } catch (error) {
       console.error('Error getting unparsed message count:', error);
-      throw error;
+      return 0;
     }
   }
 
-  // Debug methods
-  async getIntegrationsForUser(userId: string) {
+  async getTasksByUserId(userId: string): Promise<Task[]> {
+    return await this.databaseService.findTasksByUserId(userId);
+  }
+
+  async updateTask(userId: string, taskId: string, updates: Partial<Task>): Promise<Task> {
+    const task = await this.databaseService.findTaskById(taskId);
+    if (!task || task.user_id !== userId) {
+      throw new Error('Task not found or does not belong to user');
+    }
+    
+    return await this.databaseService.updateTask(taskId, updates);
+  }
+
+  async deleteTask(userId: string, taskId: string): Promise<void> {
+    const task = await this.databaseService.findTaskById(taskId);
+    if (!task || task.user_id !== userId) {
+      throw new Error('Task not found or does not belong to user');
+    }
+    
+    await this.databaseService.deleteTask(taskId);
+  }
+
+  // Additional methods for TaskController compatibility
+  async getUserTasks(userId: string): Promise<Task[]> {
+    return await this.getTasksByUserId(userId);
+  }
+
+  async updateTaskStatus(taskId: string, status: string): Promise<Task> {
+    // For backward compatibility, we'll need the userId from the task
+    const task = await this.databaseService.findTaskById(taskId);
+    if (!task) {
+      throw new Error('Task not found');
+    }
+    
+    return await this.updateTask(task.user_id, taskId, { status: status as any });
+  }
+
+  async resetMessageTracking(userId: string, integrationId: string): Promise<void> {
+    await this.databaseService.clearParsedMessages(userId, integrationId);
+  }
+
+  async getIntegrationsForUser(userId: string): Promise<any[]> {
     return await this.databaseService.findIntegrationsByUserId(userId);
   }
 

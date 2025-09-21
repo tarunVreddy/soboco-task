@@ -217,6 +217,15 @@ export class DatabaseService {
     return result.rows || [];
   }
 
+  async findTaskById(taskId: string): Promise<Task | null> {
+    const result = await query(
+      'SELECT * FROM tasks WHERE id = $1',
+      [taskId]
+    );
+
+    return result.rows.length > 0 ? result.rows[0] : null;
+  }
+
   async updateTask(id: string, updates: Partial<Task>): Promise<Task> {
     const now = new Date().toISOString();
     const fields = [];

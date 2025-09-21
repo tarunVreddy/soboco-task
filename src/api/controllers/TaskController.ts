@@ -101,7 +101,7 @@ export class TaskController {
       const user = (req as any).user;
       const { taskId } = req.params;
 
-      await this.taskService.deleteTask(taskId);
+      await this.taskService.deleteTask(user.id, taskId);
 
       res.status(200).json({ message: 'Task deleted successfully' });
     } catch (error) {
