@@ -378,63 +378,12 @@ export class DatabaseService {
       const schemaPath = path.join(__dirname, '../../db/schema.sql');
       const schema = fs.readFileSync(schemaPath, 'utf8');
       
-      // Split schema by semicolons, but handle multi-line statements properly
-      const statements = [];
-      let currentStatement = '';
-      let inDollarQuote = false;
-      let dollarTag = '';
+      // Split schema by semicolons and execute each statement
+      const statements = schema.split(';').filter(stmt => stmt.trim().length > 0);
       
-      const lines = schema.split('\n');
-      
-      for (const line of lines) {
-        const trimmedLine = line.trim();
-        
-        // Skip comments
-        if (trimmedLine.startsWith('--')) {
-          continue;
-        }
-        
-        // Handle dollar-quoted strings
-        if (trimmedLine.includes('$$')) {
-          if (!inDollarQuote) {
-            // Starting a dollar quote
-            const match = trimmedLine.match(/\$(\w*)\$/);
-            if (match) {
-              dollarTag = match[1];
-              inDollarQuote = true;
-            }
-          } else {
-            // Check if this line ends the dollar quote
-            if (trimmedLine.includes(`$$${dollarTag}$$`)) {
-              inDollarQuote = false;
-              dollarTag = '';
-            }
-          }
-        }
-        
-        currentStatement += line + '\n';
-        
-        // If we're not in a dollar quote and line ends with semicolon, we have a complete statement
-        if (!inDollarQuote && trimmedLine.endsWith(';')) {
-          const statement = currentStatement.trim();
-          if (statement.length > 0) {
-            statements.push(statement);
-          }
-          currentStatement = '';
-        }
-      }
-      
-      // Execute each statement
       for (const statement of statements) {
-        try {
-          await query(statement);
-        } catch (error: any) {
-          // Skip errors for already existing objects
-          if (error.code === '42P07' || error.code === '42710' || error.code === '42P16') {
-            console.log(`⚠️  Skipping existing object: ${error.message}`);
-            continue;
-          }
-          throw error;
+        if (statement.trim()) {
+          await query(statement.trim());
         }
       }
       

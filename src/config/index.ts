@@ -4,19 +4,19 @@ dotenv.config();
 
 export const config = {
   database: {
-    url: process.env.DATABASE_URL || 'postgresql://username:password@localhost:5432/soboco_task',
-  },
-  supabase: {
-    url: process.env.SUPABASE_URL || '',
-    anonKey: process.env.SUPABASE_ANON_KEY || '',
-    serviceRoleKey: process.env.SUPABASE_SERVICE_ROLE_KEY || '',
+    host: process.env.DATABASE_HOST || 'post-db.local',
+    port: parseInt(process.env.DATABASE_PORT || '5432'),
+    name: process.env.DATABASE_NAME || 'soboco_task',
+    user: process.env.DATABASE_USER || 'postgres',
+    password: process.env.DATABASE_PASSWORD || '',
+    url: process.env.DATABASE_URL || 'postgresql://postgres:password@post-db.local:5432/soboco_task',
   },
   jwt: {
     secret: process.env.JWT_SECRET || 'your-super-secret-jwt-key-here',
     expiresIn: '7d',
   },
   server: {
-    port: parseInt(process.env.PORT || '3001', 10),
+    port: parseInt(process.env.PORT || '3000', 10),
     nodeEnv: process.env.NODE_ENV || 'development',
   },
   ai: {
@@ -33,8 +33,8 @@ export const config = {
     redirectUri: process.env.SLACK_REDIRECT_URI || 'http://localhost:3000/auth/slack/callback',
   },
   gmail: {
-    clientId: process.env.GMAIL_CLIENT_ID || '',
-    clientSecret: process.env.GMAIL_CLIENT_SECRET || '',
+    clientId: process.env.GOOGLE_CLIENT_ID || '',
+    clientSecret: process.env.GOOGLE_CLIENT_SECRET || '',
     redirectUri: process.env.GMAIL_REDIRECT_URI || 'http://localhost:3000/auth/gmail/callback',
   },
   microsoft: {
