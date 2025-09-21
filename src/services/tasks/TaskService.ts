@@ -84,7 +84,7 @@ export class TaskService {
       console.log(`🔍 [DEBUG] Processing ${unparsedMessages.length} unparsed messages`);
 
       // Process messages in batches for efficiency
-      const BATCH_SIZE = 3; // Process 3 messages at a time (reduced to avoid rate limiting)
+      const BATCH_SIZE = 2; // Process 2 messages at a time (reduced to avoid prompt length issues)
       const batches = [];
       for (let i = 0; i < unparsedMessages.length; i += BATCH_SIZE) {
         batches.push(unparsedMessages.slice(i, i + BATCH_SIZE));
@@ -128,7 +128,11 @@ export class TaskService {
             const subject = gmailService.getSubject(message);
             const sender = gmailService.getSenderEmail(message);
             
-            batchContent.push(`--- Message ${batchContent.length + 1} ---\nSubject: ${subject}\nFrom: ${sender}\n\n${content}`);
+            // Clean and truncate content more intelligently
+            const cleanedContent = this.cleanEmailContent(content);
+            const truncatedContent = this.truncateForAI(cleanedContent, 800); // Limit to 800 chars per message
+            
+            batchContent.push(`--- Message ${batchContent.length + 1} ---\nSubject: ${subject}\nFrom: ${sender}\n\n${truncatedContent}`);
             batchMetadata.push({
               messageId: message.id,
               senderEmail: sender,
@@ -335,5 +339,72 @@ export class TaskService {
 
   async isOllamaAvailable(): Promise<boolean> {
     return await this.ollamaProvider.isAvailable();
+  }
+
+  // Helper methods for content processing
+  private cleanEmailContent(content: string): string {
+    if (!content) return '';
+    
+    // Remove common email clutter
+    let cleaned = content
+      .replace(/--\s*\n[\s\S]*$/g, '') // Remove signature blocks
+      .replace(/On .* wrote:/g, '') // Remove reply headers
+      .replace(/From:.*\n/g, '') // Remove From headers
+      .replace(/Sent:.*\n/g, '') // Remove Sent headers
+      .replace(/To:.*\n/g, '') // Remove To headers
+      .replace(/Subject:.*\n/g, '') // Remove Subject headers
+      .replace(/Date:.*\n/g, '') // Remove Date headers
+      .replace(/This email.*\n/g, '') // Remove email disclaimers
+      .replace(/Confidential.*\n/g, '') // Remove confidentiality notices
+      .replace(/Please.*\n.*recycle/g, '') // Remove recycling notices
+      .replace(/\[.*\]/g, '') // Remove bracketed content
+      .replace(/<[^>]*>/g, '') // Remove HTML tags
+      .replace(/\s+/g, ' ') // Normalize whitespace
+      .trim();
+    
+    // Remove excessive punctuation and formatting
+    cleaned = cleaned
+      .replace(/[=]{3,}/g, '') // Remove separator lines
+      .replace(/[-]{3,}/g, '') // Remove dashes
+      .replace(/[.]{3,}/g, '') // Remove excessive dots
+      .replace(/\n{3,}/g, '\n\n') // Limit consecutive newlines
+      .trim();
+    
+    return cleaned;
+  }
+
+  private truncateForAI(content: string, maxLength: number): string {
+    if (!content || content.length <= maxLength) {
+      return content;
+    }
+    
+    // Try to truncate at sentence boundaries
+    const truncated = content.substring(0, maxLength);
+    
+    // Look for sentence endings in the last 20% of the content
+    const searchStart = Math.max(0, maxLength * 0.8);
+    const searchEnd = maxLength;
+    const searchArea = truncated.substring(searchStart, searchEnd);
+    
+    const lastPeriod = searchArea.lastIndexOf('.');
+    const lastExclamation = searchArea.lastIndexOf('!');
+    const lastQuestion = searchArea.lastIndexOf('?');
+    const lastNewline = searchArea.lastIndexOf('\n');
+    
+    const bestBreak = Math.max(lastPeriod, lastExclamation, lastQuestion, lastNewline);
+    
+    if (bestBreak > searchStart * 0.5) {
+      // Found a good break point
+      return truncated.substring(0, searchStart + bestBreak + 1).trim() + '...';
+    }
+    
+    // Fallback: truncate at word boundary
+    const words = truncated.split(' ');
+    if (words.length > 1) {
+      words.pop(); // Remove the last potentially cut-off word
+      return words.join(' ') + '...';
+    }
+    
+    return truncated + '...';
   }
 }

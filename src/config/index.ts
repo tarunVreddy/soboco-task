@@ -22,9 +22,9 @@ export const config = {
   ai: {
     ollama: {
       baseUrl: process.env.OLLAMA_BASE_URL || 'http://localhost:11434',
-      model: process.env.OLLAMA_MODEL || 'phi4:latest',
-      maxTokens: parseInt(process.env.OLLAMA_MAX_TOKENS || '4000', 10),
-      batchSize: parseInt(process.env.OLLAMA_BATCH_SIZE || '10', 10),
+      model: process.env.OLLAMA_MODEL || 'llama3.2:3b', // Better model with larger context
+      maxTokens: parseInt(process.env.OLLAMA_MAX_TOKENS || '8000', 10), // Increased context window
+      batchSize: parseInt(process.env.OLLAMA_BATCH_SIZE || '5', 10),
     },
   },
   slack: {

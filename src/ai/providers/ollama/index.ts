@@ -38,33 +38,22 @@ export class OllamaProvider implements IAIProvider {
   }
 
   async extractTasks(message: string): Promise<AIExtractionResult> {
-    const prompt = this.buildPrompt(message);
+    // Pre-truncate message content to avoid prompt length issues
+    const maxMessageLength = this.maxTokens * 2; // Leave room for prompt
+    const truncatedMessage = this.truncateMessage(message, maxMessageLength);
     
-    // Check if prompt is too long
-    if (prompt.length > this.maxTokens * 4) { // Rough estimate: 1 token ≈ 4 characters
-      console.warn(`Prompt too long (${prompt.length} chars), truncating message content`);
-      const truncatedMessage = this.truncateMessage(message, this.maxTokens * 2); // Leave room for prompt
-      const truncatedPrompt = this.buildPrompt(truncatedMessage);
-      console.log(`Truncated prompt length: ${truncatedPrompt.length} characters`);
+    const prompt = this.buildPrompt(truncatedMessage);
+    
+    // Check if prompt is still too long
+    if (prompt.length > this.maxTokens * 4) {
+      console.warn(`Prompt still too long (${prompt.length} chars), using shorter message`);
+      const shorterMessage = this.truncateMessage(message, this.maxTokens * 1.5);
+      const shorterPrompt = this.buildPrompt(shorterMessage);
+      console.log(`Using shorter prompt length: ${shorterPrompt.length} characters`);
+      return this.makeOllamaRequest(shorterPrompt);
     }
     
-    try {
-      const response = await axios.post(`${this.baseUrl}/api/generate`, {
-        model: this.model,
-        prompt,
-        stream: false,
-        options: {
-          temperature: 0.1,
-          top_p: 0.9,
-        },
-      });
-
-      const result = response.data.response;
-      return this.parseResponse(result);
-    } catch (error) {
-      console.error('Error calling Ollama:', error);
-      throw new Error('Failed to extract tasks from message');
-    }
+    return this.makeOllamaRequest(prompt);
   }
 
   async extractTasksBatch(messages: BatchMessage[]): Promise<BatchExtractionResult[]> {
@@ -175,35 +164,49 @@ export class OllamaProvider implements IAIProvider {
     return truncated + ' [Content truncated...]';
   }
 
+  private async makeOllamaRequest(prompt: string): Promise<AIExtractionResult> {
+    try {
+      const response = await axios.post(`${this.baseUrl}/api/generate`, {
+        model: this.model,
+        prompt,
+        stream: false,
+        options: {
+          temperature: 0.1,
+          top_p: 0.9,
+          num_ctx: this.maxTokens, // Set context window
+        },
+      });
+
+      const result = response.data.response;
+      return this.parseResponse(result);
+    } catch (error) {
+      console.error('Error calling Ollama:', error);
+      throw new Error('Failed to extract tasks from message');
+    }
+  }
+
   private buildPrompt(message: string): string {
-    return `Extract actionable tasks from this email. Focus on requests for action, deadlines, or follow-up items.
+    return `Extract tasks from this email. Look for action items, deadlines, requests.
 
-IGNORE: newsletters, notifications, receipts, announcements, news articles.
-
-EXTRACT: direct requests, deadlines, action items, follow-ups.
+IGNORE: newsletters, receipts, announcements.
 
 Email: "${message}"
 
-Respond with JSON only:
+Return JSON only:
 {
   "tasks": [
     {
       "title": "Task title",
-      "description": "Description (optional)",
+      "description": "Description",
       "priority": "LOW|MEDIUM|HIGH|URGENT",
-      "dueDate": "YYYY-MM-DD" (only if specific date mentioned)
+      "dueDate": "YYYY-MM-DD"
     }
   ],
   "confidence": 0.85,
-  "reasoning": "Why tasks were extracted or why none found"
+  "reasoning": "Why extracted or not"
 }
 
-If no tasks found:
-{
-  "tasks": [],
-  "confidence": 0.0,
-  "reasoning": "No actionable tasks - informational content"
-}`;
+If no tasks: {"tasks":[],"confidence":0.0,"reasoning":"No actionable items"}`;
   }
 
   private buildBatchPrompt(messages: BatchMessage[]): string {
@@ -211,43 +214,33 @@ If no tasks found:
       id: msg.id,
       subject: msg.subject || 'No subject',
       sender: msg.sender || 'Unknown sender',
-      content: this.truncateMessage(msg.content, 1000) // Limit each message to 1000 chars
+      content: this.truncateMessage(msg.content, 600) // Limit each message to 600 chars
     }));
 
-    return `Extract actionable tasks from these emails. Process each message separately.
+    return `Extract tasks from these emails. Look for action items, deadlines, requests.
 
-IGNORE: newsletters, notifications, receipts, announcements, news articles.
+IGNORE: newsletters, receipts, announcements.
 
-EXTRACT: direct requests, deadlines, action items, follow-ups.
+Messages: ${JSON.stringify(messagesJson, null, 1)}
 
-Messages: ${JSON.stringify(messagesJson, null, 2)}
-
-Respond with a JSON array only (no markdown formatting):
+Return JSON array:
 [
   {
     "messageId": "message_id_1",
     "tasks": [
       {
         "title": "Task title",
-        "description": "Description (optional)",
-        "priority": "LOW",
-        "dueDate": "YYYY-MM-DD" (only if specific date mentioned)
+        "description": "Description",
+        "priority": "LOW|MEDIUM|HIGH|URGENT",
+        "dueDate": "YYYY-MM-DD"
       }
     ],
     "confidence": 0.85,
-    "reasoning": "Why tasks were extracted or why none found"
+    "reasoning": "Why extracted or not"
   }
 ]
 
-If no tasks found in a message:
-{
-  "messageId": "message_id_2",
-  "tasks": [],
-  "confidence": 0.0,
-  "reasoning": "No actionable tasks - informational content"
-}
-
-IMPORTANT: Return ONLY valid JSON. Do not include any markdown formatting, code blocks, or explanatory text.`;
+If no tasks: {"messageId":"id","tasks":[],"confidence":0.0,"reasoning":"No actionable items"}`;
   }
 
   private parseResponse(response: string): AIExtractionResult {
