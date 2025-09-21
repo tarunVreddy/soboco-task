@@ -490,6 +490,15 @@ export class DatabaseService {
     return result.rows.length > 0;
   }
 
+  async getParsedMessageIds(userId: string, integrationId: string): Promise<Set<string>> {
+    const result = await query(
+      'SELECT gmail_message_id FROM parsed_messages WHERE user_id = $1 AND integration_id = $2',
+      [userId, integrationId]
+    );
+
+    return new Set(result.rows.map(row => row.gmail_message_id));
+  }
+
   async clearParsedMessages(userId: string, integrationId: string): Promise<void> {
     await query(
       'DELETE FROM parsed_messages WHERE user_id = $1 AND integration_id = $2',

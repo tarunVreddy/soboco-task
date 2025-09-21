@@ -56,19 +56,24 @@ export class TaskService {
         });
       }
 
+      // Add a small delay after fetching messages to avoid immediate rate limiting
+      console.log(`🔍 [DEBUG] Waiting 1 second before processing messages...`);
+      await new Promise(resolve => setTimeout(resolve, 1000));
+
       let extractedCount = 0;
       let createdCount = 0;
       let processedCount = 0;
 
-      // Filter out already parsed messages
-      const unparsedMessages = [];
-      for (const message of messages) {
-        const isAlreadyParsed = await this.databaseService.isMessageParsed(userId, integrationId, message.id);
-        if (!isAlreadyParsed) {
-          unparsedMessages.push(message);
-        } else {
-          console.log(`Message ${message.id} already parsed, skipping`);
-        }
+      // Filter out already parsed messages efficiently
+      console.log(`🔍 [DEBUG] Getting parsed message IDs...`);
+      const parsedMessageIds = await this.databaseService.getParsedMessageIds(userId, integrationId);
+      console.log(`🔍 [DEBUG] Found ${parsedMessageIds.size} already parsed messages`);
+      
+      const unparsedMessages = messages.filter(message => !parsedMessageIds.has(message.id));
+      const skippedCount = messages.length - unparsedMessages.length;
+      
+      if (skippedCount > 0) {
+        console.log(`🔍 [DEBUG] Skipping ${skippedCount} already parsed messages`);
       }
 
       if (unparsedMessages.length === 0) {
@@ -79,7 +84,7 @@ export class TaskService {
       console.log(`🔍 [DEBUG] Processing ${unparsedMessages.length} unparsed messages`);
 
       // Process messages in batches for efficiency
-      const BATCH_SIZE = 5; // Process 5 messages at a time
+      const BATCH_SIZE = 3; // Process 3 messages at a time (reduced to avoid rate limiting)
       const batches = [];
       for (let i = 0; i < unparsedMessages.length; i += BATCH_SIZE) {
         batches.push(unparsedMessages.slice(i, i + BATCH_SIZE));
@@ -218,6 +223,12 @@ export class TaskService {
               gmail_message_id: message.id,
               tasks_extracted: messageTasks.length
             });
+          }
+
+          // Add a small delay between batches to avoid rate limiting
+          if (batchIndex < batches.length - 1) {
+            console.log(`🔍 [DEBUG] Waiting 2 seconds before next batch...`);
+            await new Promise(resolve => setTimeout(resolve, 2000));
           }
 
         } catch (error) {

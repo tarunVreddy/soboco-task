@@ -110,8 +110,11 @@ export class GmailService {
           // Retry the request with the new token
           return await requestFn();
         } else if (error.response?.status === 429) {
-          console.log('⏳ 429 Rate limited, waiting 5 seconds before retry...');
-          await new Promise(resolve => setTimeout(resolve, 5000));
+          // Exponential backoff for rate limiting
+          const retryAfter = error.response.headers['retry-after'] || 5;
+          const backoffTime = Math.min(retryAfter * 1000, 30000); // Max 30 seconds
+          console.log(`⏳ 429 Rate limited, waiting ${backoffTime/1000} seconds before retry...`);
+          await new Promise(resolve => setTimeout(resolve, backoffTime));
           return await requestFn();
         }
       }
